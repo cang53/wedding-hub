@@ -700,7 +700,7 @@ function SideBySideView({
   const positionEvent = (event: WeddingDayEventRow) => {
     const startTime = parseTime(event.start_time);
     const endTime = parseTime(event.end_time);
-    const duration = Math.max(0.4, endTime - startTime);
+    const duration = Math.max(0.75, endTime - startTime);
     return {
       top: (startTime - minHour) * HOUR_HEIGHT,
       height: duration * HOUR_HEIGHT,
@@ -844,6 +844,14 @@ function SplitEventCard({
   onClick: () => void;
 }) {
   const isBoth = event.assignee === "both";
+  const heightPx =
+    typeof style.height === "number"
+      ? style.height
+      : typeof style.height === "string"
+        ? Number.parseFloat(style.height)
+        : 0;
+  const isTiny = heightPx > 0 && heightPx < 56;
+  const isCompact = heightPx >= 56 && heightPx < 84;
   // Color scheme: bride = rose, groom = sage, both = burgundy (linking)
   const colorClass = isBoth
     ? "bg-burgundy/10 border-burgundy text-ink hover:bg-burgundy/15"
@@ -857,21 +865,34 @@ function SplitEventCard({
       onClick={onClick}
       style={style}
       className={`
-        absolute left-2 right-2 rounded-[4px] border text-left p-2.5 overflow-hidden
+        absolute left-2 right-2 rounded-[4px] border text-left overflow-hidden
         transition-all hover:shadow-soft hover:z-10 cursor-pointer
+        ${isTiny ? "p-1.5" : isCompact ? "p-2" : "p-2.5"}
         ${colorClass}
         ${isCurrent ? "ring-2 ring-burgundy ring-offset-1 z-10" : ""}
       `}
     >
-      <div className="text-[10px] font-mono text-ink-soft mb-0.5">
+      <div
+        className={`
+          font-mono text-ink-soft whitespace-nowrap
+          ${isTiny ? "text-[9px] mb-0" : isCompact ? "text-[9px] mb-0.5" : "text-[10px] mb-0.5"}
+        `}
+      >
         {formatTime(event.start_time)}–{formatTime(event.end_time)}
-        {isBoth && <span className="ml-1.5 text-burgundy">💑 together</span>}
+        {isBoth && <span className="ml-1.5 text-burgundy">💑</span>}
       </div>
-      <div className="font-serif text-[14px] leading-tight font-medium truncate">
+      <div
+        className={`
+          font-serif font-medium text-ink break-words
+          ${isTiny ? "text-[11px] leading-[1.1] line-clamp-1" : ""}
+          ${isCompact ? "text-[12px] leading-[1.15] line-clamp-2" : ""}
+          ${!isTiny && !isCompact ? "text-[13px] leading-tight line-clamp-2" : ""}
+        `}
+      >
         {event.title}
       </div>
-      {event.location && (
-        <div className="text-[11px] text-ink-soft truncate mt-0.5">
+      {!isTiny && event.location && (
+        <div className={`text-ink-soft break-words ${isCompact ? "text-[9px] mt-0.5 line-clamp-1" : "text-[10px] mt-0.5 line-clamp-2"}`}>
           📍 {event.location}
         </div>
       )}
