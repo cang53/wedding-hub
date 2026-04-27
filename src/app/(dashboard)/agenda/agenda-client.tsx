@@ -21,6 +21,29 @@ import {
   updateAgendaEvent,
 } from "./actions";
 
+function toLocalDateTimeParts(value: string) {
+  const date = new Date(value);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  const iso = local.toISOString();
+
+  return {
+    date: iso.slice(0, 10),
+    time: iso.slice(11, 16),
+  };
+}
+
+function getAllDayDateParts(value: string) {
+  const date = new Date(value);
+
+  return {
+    day: date.getUTCDate(),
+    month: date
+      .toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" })
+      .toUpperCase(),
+    year: date.getUTCFullYear(),
+  };
+}
+
 interface Props {
   initialEvents: AgendaRow[];
 }
@@ -152,11 +175,13 @@ function AgendaItem({
   onDelete: () => void;
 }) {
   const d = new Date(event.date);
-  const day = d.getDate();
-  const month = d
-    .toLocaleDateString("en-GB", { month: "short" })
-    .toUpperCase();
-  const year = d.getFullYear();
+  const localParts = toLocalDateTimeParts(event.date);
+  const allDayParts = getAllDayDateParts(event.date);
+  const day = event.all_day ? allDayParts.day : d.getDate();
+  const month = event.all_day
+    ? allDayParts.month
+    : d.toLocaleDateString("en-GB", { month: "short" }).toUpperCase();
+  const year = event.all_day ? allDayParts.year : d.getFullYear();
   const time = event.all_day
     ? null
     : d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
@@ -246,12 +271,15 @@ function AgendaDialog({
   }, [state, onOpenChange]);
 
   // Pre-fill date/time inputs from the existing event timestamp.
+  const editingLocalParts = editing ? toLocalDateTimeParts(editing.date) : null;
   const dateValue = editing
-    ? new Date(editing.date).toISOString().slice(0, 10)
+    ? editing.all_day
+      ? editing.date.slice(0, 10)
+      : editingLocalParts?.date ?? ""
     : "";
   const timeValue =
     editing && !editing.all_day
-      ? new Date(editing.date).toTimeString().slice(0, 5)
+      ? editingLocalParts?.time ?? ""
       : "";
 
   return (

@@ -6,17 +6,22 @@ Wedding date is set in `src/lib/config.ts` — edit `WEDDING_DATE` once it's loc
 
 ---
 
-## What's in Phase 1
+## What's in the app
 
 End-to-end working pieces:
 
 - App shell: masthead with live countdown, tab nav, footer
 - Auth: `/login` magic-link page → `/auth/callback` → allowlist gate
-- **Dashboard** with stats from all six feature tables
+- **Dashboard** with stats from all seven feature tables
 - **To-Do** — full CRUD, dialog, realtime
 - **Agenda** — full CRUD, dialog, realtime, optional time + all-day support
+- **Budget** — line items, payment status, running totals
+- **Honeymoon** — destination ideas with favourites and reference links
+- **Guests** — RSVP tracking, plus-ones, contact details
+- **Apartments** — listings, ratings, and application status
+- **Wedding Day** — ceremony-day timeline planning
 
-Migration covers all 7 tables so everything is wired up DB-side; remaining feature pages (Budget, Honeymoon, Guests, Apartments) come in Phases 2 & 3.
+Migration covers all 7 feature tables plus the auth allowlist, so everything is wired up DB-side.
 
 ---
 
@@ -147,7 +152,7 @@ The change takes effect immediately — `is_allowed()` re-checks on every reques
 
 ---
 
-## File map (Phase 1 final state)
+## File map
 
 ```
 src/
@@ -174,6 +179,26 @@ src/
         page.tsx
         agenda-client.tsx
         actions.ts
+      budget/
+        page.tsx
+        budget-client.tsx
+        actions.ts
+      honeymoon/
+        page.tsx
+        honeymoon-client.tsx
+        actions.ts
+      guests/
+        page.tsx
+        guests-client.tsx
+        actions.ts
+      apartments/
+        page.tsx
+        apartments-client.tsx
+        actions.ts
+      wedding-day/
+        page.tsx
+        wedding-day-client.tsx
+        actions.ts
   components/
     ui/                           # shadcn-style primitives
     masthead.tsx
@@ -196,6 +221,4 @@ supabase/migrations/0001_init.sql
 
 ## Roadmap
 
-- **Phase 2** — Budget feature (line-item table, status pills, running totals).
-- **Phase 3** — Honeymoon, Guests, Apartments (lower-traffic CRUD pages, batched).
 - **Later** — invitation email merge from `guests.email`, RSVP public form, exportable budget summary.
