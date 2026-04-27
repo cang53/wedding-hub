@@ -24,9 +24,9 @@ export async function createBudgetItem(_prev: unknown, form: FormData) {
   if ("error" in parsed) return { error: parsed.error };
 
   const supabase = createSupabaseServerClient();
-  const { error } = await supabase.from("budget").insert(parsed as never);
+  const { data, error } = await supabase.from("budget").insert(parsed as never).select().single();
   if (error) return { error: error.message };
-  return { ok: true as const };
+  return { ok: true as const, data };
 }
 
 export async function updateBudgetItem(id: string, _prev: unknown, form: FormData) {
@@ -34,9 +34,9 @@ export async function updateBudgetItem(id: string, _prev: unknown, form: FormDat
   if ("error" in parsed) return { error: parsed.error };
 
   const supabase = createSupabaseServerClient();
-  const { error } = await supabase.from("budget").update(parsed as never).eq("id", id);
+  const { data, error } = await supabase.from("budget").update(parsed as never).eq("id", id).select().single();
   if (error) return { error: error.message };
-  return { ok: true as const };
+  return { ok: true as const, data };
 }
 
 export async function deleteBudgetItem(id: string) {
