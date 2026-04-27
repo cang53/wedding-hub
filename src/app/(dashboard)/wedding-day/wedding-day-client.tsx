@@ -42,12 +42,13 @@ const PHASES: Phase[] = [
 ];
 
 // View modes for dual perspective
-type ViewMode = "all" | "bride" | "groom";
+type ViewMode = "all" | "bride" | "groom" | "split";
 
 const VIEW_MODES: { key: ViewMode; label: string; emoji: string }[] = [
   { key: "all", label: "Both", emoji: "💑" },
   { key: "bride", label: "Bride", emoji: "👰" },
   { key: "groom", label: "Groom", emoji: "🤵" },
+  { key: "split", label: "Side by side", emoji: "🤝" },
 ];
 
 const ASSIGNEE_META: Record<WeddingDayAssignee, { emoji: string; label: string; shortLabel: string }> = {
@@ -213,9 +214,9 @@ export function WeddingDayClient({ initialItems }: Props) {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // Filter by view mode (bride sees bride+both, groom sees groom+both, all sees all)
+  // Filter by view mode (bride sees bride+both, groom sees groom+both, all sees all, split shows all)
   const filteredItems = useMemo(() => {
-    if (viewMode === "all") return items;
+    if (viewMode === "all" || viewMode === "split") return items;
     return items.filter((i) => i.assignee === viewMode || i.assignee === "both");
   }, [items, viewMode]);
 
@@ -265,10 +266,11 @@ export function WeddingDayClient({ initialItems }: Props) {
   }, [sorted]);
 
   // Counts per assignee for the view mode tabs
-  const counts = useMemo(() => ({
+  const counts = useMemo<Record<ViewMode, number>>(() => ({
     all: items.length,
     bride: items.filter((i) => i.assignee === "bride" || i.assignee === "both").length,
     groom: items.filter((i) => i.assignee === "groom" || i.assignee === "both").length,
+    split: items.length,
   }), [items]);
 
   const days = daysUntil(WEDDING_DATE);
@@ -434,17 +436,9 @@ export function WeddingDayClient({ initialItems }: Props) {
             </div>
           )}
 
-          {/* Smart insights warnings */}
-          {insights && (insights.overlaps.length > 0 || insights.gaps.length > 0) && (
+          {/* Smart insights — gaps only (overlaps are expected when bride/groom are doing different things) */}
+          {insights && insights.gaps.length > 0 && (
             <div className="mb-6 space-y-2">
-              {insights.overlaps.map((overlap, i) => (
-                <div key={`overlap-${i}`} className="text-[13px] text-burgundy bg-burgundy/5 border border-burgundy/30 rounded-[4px] px-4 py-2.5 flex items-center gap-2">
-                  <span>⚠️</span>
-                  <span>
-                    <strong>{overlap.a.title}</strong> overlaps with <strong>{overlap.b.title}</strong>
-                  </span>
-                </div>
-              ))}
               {insights.gaps.map((gap, i) => (
                 <div key={`gap-${i}`} className="text-[13px] text-ink-soft bg-paper border border-line rounded-[4px] px-4 py-2.5 flex items-center gap-2">
                   <span>⏳</span>
@@ -456,19 +450,27 @@ export function WeddingDayClient({ initialItems }: Props) {
             </div>
           )}
 
-          {/* Phase-grouped events */}
-          <div className="space-y-8">
-            {grouped.map(({ phase, events }) => (
-              <PhaseSection
-                key={phase.key}
-                phase={phase}
-                events={events}
-                currentEventId={currentEvent?.id ?? null}
-                onEdit={(e) => { setEditing(e); setDialogOpen(true); }}
-                onDelete={handleDelete}
-              />
-            ))}
-          </div>
+          {/* Main view: phase-grouped (default) OR side-by-side bride/groom */}
+          {viewMode === "split" ? (
+            <SideBySideView
+              items={items}
+              currentEventId={currentEvent?.id ?? null}
+              onEdit={(e) => { setEditing(e); setDialogOpen(true); }}
+            />
+          ) : (
+            <div className="space-y-8">
+              {grouped.map(({ phase, events }) => (
+                <PhaseSection
+                  key={phase.key}
+                  phase={phase}
+                  events={events}
+                  currentEventId={currentEvent?.id ?? null}
+                  onEdit={(e) => { setEditing(e); setDialogOpen(true); }}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </div>
+          )}
 
           {/* Add more templates section */}
           <div className="mt-12 pt-8 border-t border-line">
@@ -661,6 +663,219 @@ function EventCard({
         </button>
       </div>
     </div>
+  );
+}
+
+// ============================================================================
+// Side-by-side bride/groom timeline
+// ============================================================================
+
+function SideBySideView({
+  items,
+  currentEventId,
+  onEdit,
+}: {
+  items: WeddingDayEventRow[];
+  currentEventId: string | null;
+  onEdit: (e: WeddingDayEventRow) => void;
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="text-center py-16 text-ink-soft">
+        <p className="font-serif text-[22px] italic">No events to compare yet.</p>
+      </div>
+    );
+  }
+
+  // Determine the time range from all events
+  const minHour = Math.floor(Math.min(...items.map((e) => parseTime(e.start_time))));
+  const maxHour = Math.ceil(Math.max(...items.map((e) => parseTime(e.end_time))));
+  const totalHours = Math.max(1, maxHour - minHour);
+  const HOUR_HEIGHT = 80; // pixels per hour
+
+  // Sort events by start time so overlapping ones layer predictably
+  const sorted = [...items].sort((a, b) => parseTime(a.start_time) - parseTime(b.start_time));
+
+  // Helper to position an event vertically
+  const positionEvent = (event: WeddingDayEventRow) => {
+    const startTime = parseTime(event.start_time);
+    const endTime = parseTime(event.end_time);
+    const duration = Math.max(0.4, endTime - startTime);
+    return {
+      top: (startTime - minHour) * HOUR_HEIGHT,
+      height: duration * HOUR_HEIGHT,
+    };
+  };
+
+  // Find moments when both partners are together
+  const togetherMoments = sorted.filter((e) => e.assignee === "both");
+
+  return (
+    <div className="bg-paper border border-line rounded-[4px] shadow-soft overflow-hidden">
+      {/* Header */}
+      <div className="grid grid-cols-[80px_1fr_1fr] border-b border-line bg-cream">
+        <div className="p-4 text-center">
+          <span className="text-[10px] uppercase tracking-[0.3em] text-ink-soft font-medium">Time</span>
+        </div>
+        <div className="p-4 text-center border-l border-line">
+          <div className="text-[28px] mb-1">👰</div>
+          <div className="font-serif text-[16px] text-ink">Bride</div>
+        </div>
+        <div className="p-4 text-center border-l border-line">
+          <div className="text-[28px] mb-1">🤵</div>
+          <div className="font-serif text-[16px] text-ink">Groom</div>
+        </div>
+      </div>
+
+      {/* Timeline body */}
+      <div className="grid grid-cols-[80px_1fr_1fr]" style={{ height: `${totalHours * HOUR_HEIGHT}px` }}>
+        {/* Time column */}
+        <div className="relative border-r border-line">
+          {Array.from({ length: totalHours + 1 }).map((_, i) => {
+            const hour = minHour + i;
+            const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+            const ampm = hour >= 12 && hour < 24 ? "PM" : "AM";
+            return (
+              <div
+                key={hour}
+                className="absolute left-0 right-0 flex items-start justify-center pt-1"
+                style={{ top: `${i * HOUR_HEIGHT}px` }}
+              >
+                <span className="text-[11px] font-mono text-ink-soft">
+                  {displayHour}:00 {ampm}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Bride column */}
+        <div className="relative border-r border-line">
+          {/* Hourly gridlines */}
+          {Array.from({ length: totalHours }).map((_, i) => (
+            <div
+              key={i}
+              className="absolute left-0 right-0 border-t border-dashed border-line/50"
+              style={{ top: `${i * HOUR_HEIGHT}px` }}
+            />
+          ))}
+          {/* Events */}
+          {sorted
+            .filter((e) => e.assignee === "bride" || e.assignee === "both")
+            .map((event) => {
+              const { top, height } = positionEvent(event);
+              return (
+                <SplitEventCard
+                  key={`b-${event.id}`}
+                  event={event}
+                  isCurrent={event.id === currentEventId}
+                  side="bride"
+                  style={{ top: `${top}px`, height: `${height}px` }}
+                  onClick={() => onEdit(event)}
+                />
+              );
+            })}
+        </div>
+
+        {/* Groom column */}
+        <div className="relative">
+          {Array.from({ length: totalHours }).map((_, i) => (
+            <div
+              key={i}
+              className="absolute left-0 right-0 border-t border-dashed border-line/50"
+              style={{ top: `${i * HOUR_HEIGHT}px` }}
+            />
+          ))}
+          {sorted
+            .filter((e) => e.assignee === "groom" || e.assignee === "both")
+            .map((event) => {
+              const { top, height } = positionEvent(event);
+              return (
+                <SplitEventCard
+                  key={`g-${event.id}`}
+                  event={event}
+                  isCurrent={event.id === currentEventId}
+                  side="groom"
+                  style={{ top: `${top}px`, height: `${height}px` }}
+                  onClick={() => onEdit(event)}
+                />
+              );
+            })}
+        </div>
+      </div>
+
+      {/* Legend / "together" moments callout */}
+      {togetherMoments.length > 0 && (
+        <div className="border-t border-line p-4 bg-burgundy/5">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-[16px]">💑</span>
+            <span className="text-[11px] uppercase tracking-[0.3em] text-burgundy font-medium">
+              Together moments
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {togetherMoments.map((e) => (
+              <div
+                key={e.id}
+                className="text-[12px] px-3 py-1 rounded-full border border-burgundy/30 bg-paper text-ink"
+              >
+                <span className="font-mono text-ink-soft mr-1.5">{formatTime(e.start_time)}</span>
+                {e.title}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SplitEventCard({
+  event,
+  isCurrent,
+  side,
+  style,
+  onClick,
+}: {
+  event: WeddingDayEventRow;
+  isCurrent: boolean;
+  side: "bride" | "groom";
+  style: React.CSSProperties;
+  onClick: () => void;
+}) {
+  const isBoth = event.assignee === "both";
+  // Color scheme: bride = rose, groom = sage, both = burgundy (linking)
+  const colorClass = isBoth
+    ? "bg-burgundy/10 border-burgundy text-ink hover:bg-burgundy/15"
+    : side === "bride"
+      ? "bg-rose/10 border-rose/60 text-ink hover:bg-rose/15"
+      : "bg-sage/10 border-sage/60 text-ink hover:bg-sage/15";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={style}
+      className={`
+        absolute left-2 right-2 rounded-[4px] border text-left p-2.5 overflow-hidden
+        transition-all hover:shadow-soft hover:z-10 cursor-pointer
+        ${colorClass}
+        ${isCurrent ? "ring-2 ring-burgundy ring-offset-1 z-10" : ""}
+      `}
+    >
+      <div className="text-[10px] font-mono text-ink-soft mb-0.5">
+        {formatTime(event.start_time)}–{formatTime(event.end_time)}
+        {isBoth && <span className="ml-1.5 text-burgundy">💑 together</span>}
+      </div>
+      <div className="font-serif text-[14px] leading-tight font-medium truncate">
+        {event.title}
+      </div>
+      {event.location && (
+        <div className="text-[11px] text-ink-soft truncate mt-0.5">
+          📍 {event.location}
+        </div>
+      )}
+    </button>
   );
 }
 
