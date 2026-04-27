@@ -124,9 +124,18 @@ body::before {
   z-index: 0;
 }
 
-body > * {
+body > :not([data-radix-portal]) {
   position: relative;
   z-index: 1;
+}
+
+[data-radix-portal] {
+  position: relative;
+  z-index: auto;
+}
+
+[data-radix-popper-content-wrapper] {
+  z-index: 10000 !important;
 }
 
 /* ==========================================================================
