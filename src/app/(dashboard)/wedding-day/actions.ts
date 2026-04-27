@@ -21,9 +21,9 @@ export async function createWeddingDayEvent(_prev: unknown, form: FormData) {
   if ("error" in parsed) return { error: parsed.error };
 
   const supabase = createSupabaseServerClient();
-  const { error } = await supabase.from("wedding_day_events").insert(parsed as never);
+  const { data, error } = await supabase.from("wedding_day_events").insert(parsed as never).select().single();
   if (error) return { error: error.message };
-  return { ok: true as const };
+  return { ok: true as const, data };
 }
 
 export async function updateWeddingDayEvent(id: string, _prev: unknown, form: FormData) {
@@ -31,9 +31,9 @@ export async function updateWeddingDayEvent(id: string, _prev: unknown, form: Fo
   if ("error" in parsed) return { error: parsed.error };
 
   const supabase = createSupabaseServerClient();
-  const { error } = await supabase.from("wedding_day_events").update(parsed as never).eq("id", id);
+  const { data, error } = await supabase.from("wedding_day_events").update(parsed as never).eq("id", id).select().single();
   if (error) return { error: error.message };
-  return { ok: true as const };
+  return { ok: true as const, data };
 }
 
 export async function deleteWeddingDayEvent(id: string) {

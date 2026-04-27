@@ -266,7 +266,10 @@ export function WeddingDayClient({ initialItems }: Props) {
       fd.set("end_time", event.end_time);
       fd.set("location", event.location ?? "");
       fd.set("notes", event.notes ?? "");
-      await createWeddingDayEvent(null, fd);
+      const result = await createWeddingDayEvent(null, fd);
+      if ("data" in result && result.data) {
+        setItems((prev) => prev.some((i) => i.id === result.data.id) ? prev : [...prev, result.data]);
+      }
     }
   };
 
@@ -413,6 +416,12 @@ export function WeddingDayClient({ initialItems }: Props) {
         open={dialogOpen}
         onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditing(null); }}
         editing={editing}
+        onEventAdded={(event) => {
+          setItems((prev) => prev.some((i) => i.id === event.id) ? prev : [...prev, event]);
+        }}
+        onEventUpdated={(event) => {
+          setItems((prev) => prev.map((i) => (i.id === event.id ? event : i)));
+        }}
       />
     </section>
   );
@@ -623,15 +632,24 @@ function WeddingDayDialog({
   open,
   onOpenChange,
   editing,
+  onEventAdded,
+  onEventUpdated,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   editing: WeddingDayEventRow | null;
+  onEventAdded: (event: WeddingDayEventRow) => void;
+  onEventUpdated: (event: WeddingDayEventRow) => void;
 }) {
   const action = editing ? updateWeddingDayEvent.bind(null, editing.id) : createWeddingDayEvent;
-  const [state, formAction, pending] = useActionState<{ error?: string; ok?: true } | null, FormData>(action, null);
+  const [state, formAction, pending] = useActionState<{ error?: string; ok?: true; data?: WeddingDayEventRow } | null, FormData>(action, null);
 
-  useEffect(() => { if (state?.ok) onOpenChange(false); }, [state, onOpenChange]);
+  useEffect(() => {
+    if (state?.ok && state?.data) {
+      editing ? onEventUpdated(state.data) : onEventAdded(state.data);
+      onOpenChange(false);
+    }
+  }, [state, onOpenChange, editing, onEventAdded, onEventUpdated]);
 
   const startDefault = editing ? formatTime(editing.start_time) : "";
   const endDefault = editing ? formatTime(editing.end_time) : "";
@@ -705,7 +723,7 @@ function WeddingDayDialog({
           {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
 
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
             <Button type="submit" disabled={pending}>{pending ? "Saving…" : editing ? "Save changes" : "Add to day"}</Button>
           </DialogFooter>
         </form>
