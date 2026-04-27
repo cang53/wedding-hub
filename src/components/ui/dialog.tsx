@@ -32,23 +32,28 @@ const DialogContent = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed left-1/2 top-[5vh] z-50 flex flex-col w-full max-w-[540px] -translate-x-1/2",
-        "max-h-[90vh] overflow-y-auto",
-        "border border-line bg-paper p-9 rounded-[4px] shadow-lifted",
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-        className
-      )}
-      {...props}
-    >
-      {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 text-ink-soft transition-colors hover:text-ink focus:outline-none focus:ring-2 focus:ring-burgundy rounded-sm p-1">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
+    {/* Scrollable wrapper that centers the dialog when small, allows scroll when tall */}
+    <div className="fixed inset-0 z-50 overflow-y-auto overscroll-contain">
+      <div className="flex min-h-full items-center justify-center p-4 sm:p-6">
+        <DialogPrimitive.Content
+          ref={ref}
+          className={cn(
+            "relative flex flex-col w-full max-w-[540px]",
+            "border border-line bg-paper rounded-[4px] shadow-lifted",
+            "p-6 sm:p-8",
+            "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+            className
+          )}
+          {...props}
+        >
+          {children}
+          <DialogPrimitive.Close className="absolute right-3 top-3 text-ink-soft transition-colors hover:text-ink focus:outline-none focus:ring-2 focus:ring-burgundy rounded-sm p-1">
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </DialogPrimitive.Close>
+        </DialogPrimitive.Content>
+      </div>
+    </div>
   </DialogPortal>
 ));
 DialogContent.displayName = DialogPrimitive.Content.displayName;
@@ -67,7 +72,7 @@ const DialogFooter = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "sticky bottom-0 mt-6 flex justify-end gap-2.5 border-t border-line pt-[18px] bg-paper",
+      "mt-6 flex justify-end gap-2.5 border-t border-line pt-[18px]",
       className
     )}
     {...props}
