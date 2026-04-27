@@ -115,6 +115,16 @@ export interface ApartmentRow {
 
 export type WeddingDayAssignee = "bride" | "groom" | "both";
 
+export interface WeddingSavingsRow {
+  id: string;
+  amount: number;
+  saved_on: string; // YYYY-MM-DD
+  source: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface WeddingDayEventRow {
   id: string;
   title: string;
@@ -329,6 +339,28 @@ export type Database = {
           location?: string | null;
           notes?: string | null;
           assignee?: WeddingDayAssignee;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      wedding_savings: {
+        Row: WeddingSavingsRow;
+        Insert: {
+          id?: string;
+          amount: number;
+          saved_on?: string;
+          source?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          amount?: number;
+          saved_on?: string;
+          source?: string | null;
+          notes?: string | null;
           created_at?: string;
           updated_at?: string;
         };
