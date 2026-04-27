@@ -13,11 +13,20 @@ const DialogClose = DialogPrimitive.Close;
 const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
+>(({ className, style, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
+    style={{
+      position: "fixed",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      zIndex: 50,
+      backgroundColor: "rgba(0, 0, 0, 0.5)",
+      ...style,
+    }}
     className={cn(
-      "fixed inset-0 z-50 bg-ink/50 backdrop-blur-[4px]",
       "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
       className
     )}
@@ -29,35 +38,57 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, style, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        // Centered on viewport using fixed + transform
-        "fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
-        // Sizing: full width on mobile minus margins, max 540px on desktop
-        "w-[calc(100vw-2rem)] max-w-[540px]",
-        // Height: max 90vh with internal scrolling
-        "max-h-[90vh] flex flex-col",
-        // Visual styling
-        "border border-line bg-paper rounded-[4px] shadow-lifted",
-        // Animations
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-        className
-      )}
-      {...props}
+    {/* Wrapper using flex to center the dialog in viewport */}
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        zIndex: 51,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1rem",
+        pointerEvents: "none",
+        overflowY: "auto",
+      }}
     >
-      {/* Scrollable inner area — content scrolls, header/footer can stay sticky */}
-      <div className="flex flex-col overflow-y-auto p-6 sm:p-8">
-        {children}
-      </div>
-      <DialogPrimitive.Close className="absolute right-3 top-3 z-10 text-ink-soft transition-colors hover:text-ink focus:outline-none focus:ring-2 focus:ring-burgundy rounded-sm p-1 bg-paper">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
+      <DialogPrimitive.Content
+        ref={ref}
+        style={{
+          pointerEvents: "auto",
+          width: "100%",
+          maxWidth: "540px",
+          maxHeight: "calc(100vh - 2rem)",
+          display: "flex",
+          flexDirection: "column",
+          ...style,
+        }}
+        className={cn(
+          "relative",
+          "border border-line bg-paper rounded-[4px] shadow-lifted",
+          "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+          className
+        )}
+        {...props}
+      >
+        <div className="overflow-y-auto p-6 sm:p-8 flex flex-col">
+          {children}
+        </div>
+        <DialogPrimitive.Close
+          className="absolute right-3 top-3 z-10 text-ink-soft transition-colors hover:text-ink focus:outline-none focus:ring-2 focus:ring-burgundy rounded-sm p-1.5 bg-paper"
+          aria-label="Close"
+        >
+          <X className="h-4 w-4" />
+          <span className="sr-only">Close</span>
+        </DialogPrimitive.Close>
+      </DialogPrimitive.Content>
+    </div>
   </DialogPortal>
 ));
 DialogContent.displayName = DialogPrimitive.Content.displayName;
