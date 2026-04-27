@@ -4,9 +4,9 @@ import { Button } from "@/components/ui/button";
 
 const FRIENDLY_MESSAGES: Record<string, string> = {
   not_allowed:
-    "That email isn't on the allowlist. This app is private to two people — if you think this is a mistake, double-check the spelling and try again.",
+    "That sign-in link is no longer needed. Head back to the app and continue from there.",
   missing_code:
-    "The sign-in link didn't include a code. Try requesting a fresh magic link.",
+    "That sign-in link is incomplete. Head back to the app and start from there instead.",
 };
 
 export default async function AuthErrorPage({
@@ -18,7 +18,7 @@ export default async function AuthErrorPage({
   const message =
     (reason && FRIENDLY_MESSAGES[reason]) ||
     reason ||
-    "Something went wrong while signing you in.";
+    "Something went wrong while opening the old sign-in flow.";
 
   return (
     <main className="min-h-screen w-full flex items-center justify-center px-6 py-12">
@@ -37,7 +37,7 @@ export default async function AuthErrorPage({
 
         <div className="mt-6">
           <Button asChild>
-            <Link href="/login">Try again</Link>
+            <Link href="/">Back to the app</Link>
           </Button>
         </div>
       </div>
