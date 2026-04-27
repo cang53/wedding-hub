@@ -113,6 +113,17 @@ export interface ApartmentRow {
   updated_at: string;
 }
 
+export interface WeddingDayEventRow {
+  id: string;
+  title: string;
+  start_time: string;
+  end_time: string;
+  location: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ====== Database type — supabase-js v2.49+ shape =================================
 
 export type Database = {
@@ -289,6 +300,30 @@ export type Database = {
           status?: ApartmentStatus;
           rating?: number;
           link?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      wedding_day_events: {
+        Row: WeddingDayEventRow;
+        Insert: {
+          id?: string;
+          title: string;
+          start_time: string;
+          end_time: string;
+          location?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          title?: string;
+          start_time?: string;
+          end_time?: string;
+          location?: string | null;
+          notes?: string | null;
           created_at?: string;
           updated_at?: string;
         };

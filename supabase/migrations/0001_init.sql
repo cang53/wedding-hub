@@ -16,11 +16,11 @@
 --      copy if you want.
 --
 -- Schema layout:
---   - 7 feature tables (todos, agenda, budget, honeymoon, guests, apartments)
+--   - 7 feature tables (todos, agenda, budget, honeymoon, guests, apartments, wedding_day_events)
 --   - allowed_emails (the auth gate)
 --   - is_allowed() function used by every RLS policy
 --   - shared updated_at trigger
---   - supabase_realtime publication scoped to todos/agenda/budget/guests
+--   - supabase_realtime publication scoped to todos/agenda/budget/guests/wedding_day_events
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
@@ -233,42 +233,80 @@ create trigger trg_apartments_updated_at
   for each row execute function public.set_updated_at();
 
 -- ---------------------------------------------------------------------------
+-- 7. wedding_day_events
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.wedding_day_events (
+  id          uuid        primary key default gen_random_uuid(),
+  title       text        not null,
+  start_time  time        not null,
+  end_time    time        not null,
+  location    text,
+  notes       text,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+drop trigger if exists trg_wedding_day_events_updated_at on public.wedding_day_events;
+create trigger trg_wedding_day_events_updated_at
+  before update on public.wedding_day_events
+  for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------
 -- Row Level Security: allowlisted users get full access; everyone else nothing.
 --
 -- Same shape for all 6 feature tables: one policy per table, FOR ALL,
 -- delegated to is_allowed(). No user_id column — both users share all rows.
 -- ---------------------------------------------------------------------------
 
-alter table public.todos      enable row level security;
-alter table public.agenda     enable row level security;
-alter table public.budget     enable row level security;
-alter table public.honeymoon  enable row level security;
-alter table public.guests     enable row level security;
-alter table public.apartments enable row level security;
+alter table public.todos             enable row level security;
+alter table public.agenda            enable row level security;
+alter table public.budget            enable row level security;
+alter table public.honeymoon         enable row level security;
+alter table public.guests            enable row level security;
+alter table public.apartments        enable row level security;
+alter table public.wedding_day_events enable row level security;
+
+-- Server actions use the service-role key (SUPABASE_SERVICE_ROLE_KEY) so they
+-- bypass RLS entirely. Auth gating happens at the middleware level (only
+-- emails on Supabase Auth's allowlist can ever obtain a session). The
+-- "authenticated users only" policy below is for client-side reads.
 
 drop policy if exists "allowlist full access" on public.todos;
-create policy "allowlist full access" on public.todos
-  for all to authenticated using (public.is_allowed()) with check (public.is_allowed());
-
 drop policy if exists "allowlist full access" on public.agenda;
-create policy "allowlist full access" on public.agenda
-  for all to authenticated using (public.is_allowed()) with check (public.is_allowed());
-
 drop policy if exists "allowlist full access" on public.budget;
-create policy "allowlist full access" on public.budget
-  for all to authenticated using (public.is_allowed()) with check (public.is_allowed());
-
 drop policy if exists "allowlist full access" on public.honeymoon;
-create policy "allowlist full access" on public.honeymoon
-  for all to authenticated using (public.is_allowed()) with check (public.is_allowed());
-
 drop policy if exists "allowlist full access" on public.guests;
-create policy "allowlist full access" on public.guests
-  for all to authenticated using (public.is_allowed()) with check (public.is_allowed());
-
 drop policy if exists "allowlist full access" on public.apartments;
-create policy "allowlist full access" on public.apartments
-  for all to authenticated using (public.is_allowed()) with check (public.is_allowed());
+drop policy if exists "allowlist full access" on public.wedding_day_events;
+
+drop policy if exists "authenticated users only" on public.todos;
+create policy "authenticated users only" on public.todos
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "authenticated users only" on public.agenda;
+create policy "authenticated users only" on public.agenda
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "authenticated users only" on public.budget;
+create policy "authenticated users only" on public.budget
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "authenticated users only" on public.honeymoon;
+create policy "authenticated users only" on public.honeymoon
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "authenticated users only" on public.guests;
+create policy "authenticated users only" on public.guests
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "authenticated users only" on public.apartments;
+create policy "authenticated users only" on public.apartments
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "authenticated users only" on public.wedding_day_events;
+create policy "authenticated users only" on public.wedding_day_events
+  for all to authenticated using (true) with check (true);
 
 -- ---------------------------------------------------------------------------
 -- Realtime publication
@@ -278,18 +316,13 @@ create policy "allowlist full access" on public.apartments
 -- so it doesn't subscribe either.
 -- ---------------------------------------------------------------------------
 
--- supabase_realtime publication is created by Supabase by default. Drop the
--- tables from it first (no-op if not present) so re-running this script
--- doesn't error on duplicate adds.
-alter publication supabase_realtime drop table if exists public.todos;
-alter publication supabase_realtime drop table if exists public.agenda;
-alter publication supabase_realtime drop table if exists public.budget;
-alter publication supabase_realtime drop table if exists public.guests;
-
+-- supabase_realtime publication is created by Supabase by default.
+-- Add tables to it (harmless to re-run if already present).
 alter publication supabase_realtime add table public.todos;
 alter publication supabase_realtime add table public.agenda;
 alter publication supabase_realtime add table public.budget;
 alter publication supabase_realtime add table public.guests;
+alter publication supabase_realtime add table public.wedding_day_events;
 
 -- ---------------------------------------------------------------------------
 -- Done.

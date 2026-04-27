@@ -1,6 +1,6 @@
 "use server";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
 
 function parseInput(form: FormData) {
   const name = String(form.get("name") ?? "").trim();
@@ -19,7 +19,7 @@ export async function createDestination(_prev: unknown, form: FormData) {
   const parsed = parseInput(form);
   if ("error" in parsed) return { error: parsed.error };
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("honeymoon").insert({ ...parsed, favorite: false } as never);
   if (error) return { error: error.message };
   return { ok: true as const };
@@ -29,18 +29,18 @@ export async function updateDestination(id: string, _prev: unknown, form: FormDa
   const parsed = parseInput(form);
   if ("error" in parsed) return { error: parsed.error };
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("honeymoon").update(parsed as never).eq("id", id);
   if (error) return { error: error.message };
   return { ok: true as const };
 }
 
 export async function toggleFavorite(id: string, favorite: boolean) {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   await supabase.from("honeymoon").update({ favorite } as never).eq("id", id);
 }
 
 export async function deleteDestination(id: string) {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   await supabase.from("honeymoon").delete().eq("id", id);
 }

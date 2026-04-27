@@ -495,3 +495,183 @@ body > * {
 .apt-status-visited    { background: rgba(138, 154, 123, 0.2); color: var(--sage); }
 .apt-status-rejected   { background: rgba(43, 29, 26, 0.08);   color: var(--ink-soft); }
 .apt-status-applied    { background: rgba(107, 31, 42, 0.15);  color: var(--burgundy); }
+
+/* ============ WEDDING DAY ============ */
+.wedding-timeline {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 16px;
+  position: relative;
+}
+
+@media (max-width: 640px) {
+  .wedding-timeline {
+    grid-template-columns: 60px 1fr;
+    gap: 10px;
+  }
+  .timeline-event-inner { padding: 8px 10px; }
+  .timeline-event-title { font-size: 15px; }
+}
+
+.timeline-labels {
+  border-right: 2px solid var(--line);
+  padding-right: 12px;
+  position: relative;
+}
+
+.timeline-hour {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+}
+
+/* Subtle dashed gridline extending into events column */
+.timeline-hour::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: -16px;
+  left: 100%;
+  height: 1px;
+  border-top: 1px dashed var(--line);
+  opacity: 0.5;
+}
+
+.timeline-time {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-align: right;
+  width: 100%;
+  padding-top: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+  transform: translateY(-6px);
+}
+
+.timeline-events {
+  position: relative;
+}
+
+.timeline-event {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.timeline-event:hover {
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+  z-index: 2;
+}
+
+.timeline-event-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 10px 14px;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.timeline-event-time {
+  font-size: 10px;
+  font-weight: 700;
+  margin-bottom: 2px;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-event-title {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 500;
+  margin-bottom: 2px;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.timeline-event-location {
+  font-size: 11px;
+  font-style: italic;
+  opacity: 0.85;
+  margin-bottom: 2px;
+  color: var(--ink-soft);
+}
+
+.timeline-event-notes {
+  font-size: 12px;
+  line-height: 1.4;
+  margin-top: 4px;
+  color: var(--ink-soft);
+}
+
+.timeline-event-delete {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 100px;
+  background: rgba(43, 29, 26, 0.06);
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  transition: all 0.15s ease;
+  font-family: var(--font-sans);
+}
+
+.timeline-event-delete:hover {
+  background: var(--burgundy);
+  color: var(--cream);
+  opacity: 1;
+}
+
+/* Event color variants — paper background with colored left bar */
+.event-burgundy {
+  background: rgba(107, 31, 42, 0.06);
+  border: 1px solid rgba(107, 31, 42, 0.25);
+  border-left: 3px solid var(--burgundy);
+}
+.event-burgundy .timeline-event-time { color: var(--burgundy); }
+
+.event-gold {
+  background: rgba(184, 149, 106, 0.08);
+  border: 1px solid rgba(184, 149, 106, 0.25);
+  border-left: 3px solid var(--gold);
+}
+.event-gold .timeline-event-time { color: var(--gold); }
+
+.event-rose {
+  background: rgba(201, 122, 110, 0.08);
+  border: 1px solid rgba(201, 122, 110, 0.25);
+  border-left: 3px solid var(--rose);
+}
+.event-rose .timeline-event-time { color: var(--rose); }
+
+.event-sage {
+  background: rgba(138, 154, 123, 0.08);
+  border: 1px solid rgba(138, 154, 123, 0.25);
+  border-left: 3px solid var(--sage);
+}
+.event-sage .timeline-event-time { color: var(--sage); }
+
+.event-ink-soft {
+  background: rgba(90, 71, 66, 0.05);
+  border: 1px solid rgba(90, 71, 66, 0.2);
+  border-left: 3px solid var(--ink-soft);
+}
+.event-ink-soft .timeline-event-time { color: var(--ink-soft); }

@@ -386,6 +386,12 @@ function SelectFormField({
   options: { value: string; label: string }[];
 }) {
   const [value, setValue] = useState(defaultValue);
+
+  // Keep the controlled value in sync when `defaultValue` (prop) changes
+  // e.g. when opening the dialog to edit a different todo.
+  useEffect(() => {
+    setValue(defaultValue);
+  }, [defaultValue]);
   return (
     <>
       <input type="hidden" name={name} value={value} />

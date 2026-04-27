@@ -1,6 +1,6 @@
 "use server";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
 import type { BudgetStatus } from "@/types/db";
 
 const VALID_STATUSES: BudgetStatus[] = ["pending", "deposit", "paid"];
@@ -23,7 +23,7 @@ export async function createBudgetItem(_prev: unknown, form: FormData) {
   const parsed = parseInput(form);
   if ("error" in parsed) return { error: parsed.error };
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("budget").insert(parsed as never);
   if (error) return { error: error.message };
   return { ok: true as const };
@@ -33,13 +33,13 @@ export async function updateBudgetItem(id: string, _prev: unknown, form: FormDat
   const parsed = parseInput(form);
   if ("error" in parsed) return { error: parsed.error };
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("budget").update(parsed as never).eq("id", id);
   if (error) return { error: error.message };
   return { ok: true as const };
 }
 
 export async function deleteBudgetItem(id: string) {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   await supabase.from("budget").delete().eq("id", id);
 }

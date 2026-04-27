@@ -1,4 +1,4 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
 import { formatDate, formatMoney } from "@/lib/utils";
 import type {
   TodoPriority,
@@ -25,7 +25,7 @@ type GuestStat = Pick<GuestRow, "rsvp" | "plus_one">;
 type HoneymoonStat = Pick<HoneymoonRow, "id" | "favorite">;
 
 export default async function DashboardPage() {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
 
   const todayIso = new Date(new Date().toDateString()).toISOString();
 

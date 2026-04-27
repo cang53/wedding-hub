@@ -17,6 +17,7 @@ const TABS: Tab[] = [
   { href: "/honeymoon",  label: "Honeymoon", icon: "✈" },
   { href: "/guests",     label: "Guests",    icon: "♥" },
   { href: "/apartments", label: "Home",      icon: "⌂" },
+  { href: "/wedding-day", label: "Day",      icon: "⌚" },
 ];
 
 export function TabNav() {

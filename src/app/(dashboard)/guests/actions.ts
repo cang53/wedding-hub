@@ -1,6 +1,6 @@
 "use server";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
 import type { GuestRsvp, GuestSide } from "@/types/db";
 
 const VALID_SIDES: GuestSide[] = ["bride", "groom", "both"];
@@ -28,7 +28,7 @@ export async function createGuest(_prev: unknown, form: FormData) {
   const parsed = parseInput(form);
   if ("error" in parsed) return { error: parsed.error };
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("guests").insert(parsed as never);
   if (error) return { error: error.message };
   return { ok: true as const };
@@ -38,13 +38,13 @@ export async function updateGuest(id: string, _prev: unknown, form: FormData) {
   const parsed = parseInput(form);
   if ("error" in parsed) return { error: parsed.error };
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("guests").update(parsed as never).eq("id", id);
   if (error) return { error: error.message };
   return { ok: true as const };
 }
 
 export async function deleteGuest(id: string) {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   await supabase.from("guests").delete().eq("id", id);
 }

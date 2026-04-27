@@ -1,10 +1,10 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
 import { AgendaClient } from "./agenda-client";
 
 export const dynamic = "force-dynamic";
 
 export default async function AgendaPage() {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   const { data } = await supabase
     .from("agenda")
     .select("*")

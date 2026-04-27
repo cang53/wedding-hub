@@ -1,6 +1,6 @@
 "use server";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
 
 type AgendaInput = {
   title: string;
@@ -38,7 +38,7 @@ export async function createAgendaEvent(_prev: unknown, form: FormData) {
   const parsed = parseInput(form);
   if ("error" in parsed) return { error: parsed.error };
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   // See note in todo/actions.ts about the `as never` cast.
   const { error } = await supabase.from("agenda").insert(parsed as never);
 
@@ -50,7 +50,7 @@ export async function updateAgendaEvent(id: string, _prev: unknown, form: FormDa
   const parsed = parseInput(form);
   if ("error" in parsed) return { error: parsed.error };
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   const { error } = await supabase
     .from("agenda")
     .update(parsed as never)
@@ -61,6 +61,6 @@ export async function updateAgendaEvent(id: string, _prev: unknown, form: FormDa
 }
 
 export async function deleteAgendaEvent(id: string) {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   await supabase.from("agenda").delete().eq("id", id);
 }

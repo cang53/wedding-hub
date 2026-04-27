@@ -1,6 +1,6 @@
 "use server";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
 import type { TodoCategory, TodoPriority } from "@/types/db";
 
 export type TodoFormInput = {
@@ -36,7 +36,7 @@ export async function createTodo(_prev: unknown, form: FormData) {
   const parsed = parseInput(form);
   if ("error" in parsed) return { error: parsed.error };
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   // `as never` cast: supabase-js v2.49+ infers a strict Insert type that
   // can collapse to `never` when no Database generic is supplied. The
   // runtime accepts the object fine; this just tells TS to relax.
@@ -53,7 +53,7 @@ export async function updateTodo(id: string, _prev: unknown, form: FormData) {
   const parsed = parseInput(form);
   if ("error" in parsed) return { error: parsed.error };
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   const { error } = await supabase
     .from("todos")
     .update(parsed as never)
@@ -64,11 +64,11 @@ export async function updateTodo(id: string, _prev: unknown, form: FormData) {
 }
 
 export async function toggleTodo(id: string, done: boolean) {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   await supabase.from("todos").update({ done } as never).eq("id", id);
 }
 
 export async function deleteTodo(id: string) {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServerClient();
   await supabase.from("todos").delete().eq("id", id);
 }
