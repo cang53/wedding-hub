@@ -1,0 +1,37 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+
+export function RoleSelector() {
+  const router = useRouter();
+  const [role, setRole] = useState<"bride" | "groom" | null>(null);
+
+  useEffect(() => {
+    const savedRole = localStorage.getItem("wedding-role") as "bride" | "groom" | null;
+    setRole(savedRole);
+  }, []);
+
+  const handleChangeRole = () => {
+    localStorage.removeItem("wedding-role");
+    router.push("/");
+  };
+
+  if (!role) return null;
+
+  const emoji = role === "bride" ? "👰" : "🤵";
+  const label = role === "bride" ? "Bride" : "Groom";
+
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-[13px] text-ink-soft">Viewing as</span>
+      <button
+        onClick={handleChangeRole}
+        className="flex items-center gap-2 px-3 py-2 rounded-[4px] border border-line hover:border-burgundy hover:bg-burgundy/5 transition-colors font-sans text-[13px] font-medium"
+      >
+        <span>{emoji}</span>
+        <span>{label}</span>
+      </button>
+    </div>
+  );
+}

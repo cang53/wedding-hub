@@ -1,6 +1,6 @@
 import { Masthead } from "@/components/masthead";
 import { TabNav } from "@/components/tab-nav";
-import { signOutAction } from "./actions";
+import { RoleSelector } from "@/components/role-selector";
 
 export default function DashboardLayout({
   children,
@@ -16,14 +16,7 @@ export default function DashboardLayout({
 
       <footer className="text-center mt-20 pt-8 border-t border-line font-script text-lg text-ink-soft flex items-center justify-center gap-6">
         <span>~ made for Celal &amp; love, with love ~</span>
-        <form action={signOutAction}>
-          <button
-            type="submit"
-            className="font-sans text-[11px] uppercase tracking-[0.2em] text-ink-soft/70 hover:text-burgundy transition-colors"
-          >
-            Sign out
-          </button>
-        </form>
+        <RoleSelector />
       </footer>
     </div>
   );
