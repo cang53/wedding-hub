@@ -1,0 +1,497 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ==========================================================================
+   Wedding Hub — palette and base tokens
+   Romantic editorial: cream, burgundy, gold. Tokens lifted from the
+   working HTML prototype. Fonts are wired up in src/app/layout.tsx via
+   next/font/google and exposed as CSS variables.
+   ========================================================================== */
+
+:root {
+  --cream: #f5efe6;
+  --cream-deep: #ede4d3;
+  --paper: #faf6ee;
+  --ink: #2b1d1a;
+  --ink-soft: #5a4742;
+  --burgundy: #6b1f2a;
+  --burgundy-deep: #4a1219;
+  --rose: #c97a6e;
+  --gold: #b8956a;
+  --sage: #8a9a7b;
+  --line: #d8ccb8;
+
+  --shadow-sm: 0 1px 3px rgba(43, 29, 26, 0.08), 0 8px 24px rgba(43, 29, 26, 0.06);
+  --shadow-lg: 0 4px 12px rgba(43, 29, 26, 0.1), 0 24px 48px rgba(43, 29, 26, 0.12);
+
+  /* shadcn-compatible aliases — kept dim so default shadcn primitives
+     don't fight the romantic palette. We override most surfaces explicitly. */
+  --background: var(--cream);
+  --foreground: var(--ink);
+  --card: var(--paper);
+  --card-foreground: var(--ink);
+  --popover: var(--paper);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--cream);
+  --secondary: var(--cream-deep);
+  --secondary-foreground: var(--ink);
+  --muted: var(--cream-deep);
+  --muted-foreground: var(--ink-soft);
+  --accent: var(--burgundy);
+  --accent-foreground: var(--cream);
+  --destructive: var(--burgundy);
+  --destructive-foreground: var(--cream);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--burgundy);
+  --radius: 4px;
+}
+
+@theme inline {
+  /* Color tokens — make the palette available as Tailwind utilities
+     (bg-cream, text-burgundy, border-line, etc.). */
+  --color-cream: var(--cream);
+  --color-cream-deep: var(--cream-deep);
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-burgundy: var(--burgundy);
+  --color-burgundy-deep: var(--burgundy-deep);
+  --color-rose: var(--rose);
+  --color-gold: var(--gold);
+  --color-sage: var(--sage);
+  --color-line: var(--line);
+
+  /* shadcn aliases */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+
+  /* Fonts — the variables are declared on <html> by next/font in layout.tsx */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: var(--font-cormorant), "Cormorant Garamond", Georgia, serif;
+  --font-script: var(--font-caveat), "Caveat", cursive;
+}
+
+/* ==========================================================================
+   Base typography & background
+   ========================================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-weight: 400;
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 20% 10%, rgba(184, 149, 106, 0.08) 0%, transparent 40%),
+    radial-gradient(circle at 80% 70%, rgba(107, 31, 42, 0.05) 0%, transparent 40%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ==========================================================================
+   Reusable display elements lifted from the prototype
+   ========================================================================== */
+
+@layer components {
+  /* Italic burgundy accent for headings: <h2>The <em>overview</em></h2> */
+  .display em,
+  h1 em,
+  h2 em,
+  h3 em,
+  h4 em {
+    font-style: italic;
+    color: var(--burgundy);
+  }
+
+  /* Ornament: gold line — diamond — gold line */
+  .ornament {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin: 18px 0;
+  }
+  .ornament .line {
+    width: 80px;
+    height: 1px;
+    background: var(--gold);
+  }
+  .ornament .diamond {
+    width: 6px;
+    height: 6px;
+    background: var(--gold);
+    transform: rotate(45deg);
+  }
+
+  /* Shadow recipes from prototype */
+  .shadow-soft {
+    box-shadow: var(--shadow-sm);
+  }
+  .shadow-lifted {
+    box-shadow: var(--shadow-lg);
+  }
+
+  /* Stat card: paper surface with burgundy left bar */
+  .stat-card {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    padding: 28px;
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+  }
+  .stat-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 3px;
+    height: 100%;
+    background: var(--burgundy);
+  }
+  .stat-card .label {
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 10px;
+    color: var(--ink-soft);
+    margin-bottom: 12px;
+    font-weight: 500;
+  }
+  .stat-card .value {
+    font-family: var(--font-serif);
+    font-size: 44px;
+    line-height: 1;
+    font-weight: 500;
+    color: var(--ink);
+    margin-bottom: 6px;
+  }
+  .stat-card .meta {
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+
+  /* Tag pills used on todos */
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 100px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 500;
+  }
+  .tag-wedding   { background: rgba(107, 31, 42, 0.10); color: var(--burgundy); }
+  .tag-honeymoon { background: rgba(138, 154, 123, 0.15); color: var(--sage); }
+  .tag-home      { background: rgba(184, 149, 106, 0.15); color: var(--gold); }
+  .tag-personal  { background: rgba(43, 29, 26, 0.08); color: var(--ink-soft); }
+
+  /* Status pills (budget) */
+  .status-pill {
+    display: inline-block;
+    padding: 4px 10px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 500;
+    border-radius: 100px;
+  }
+  .status-paid    { background: rgba(138, 154, 123, 0.20); color: var(--sage); }
+  .status-deposit { background: rgba(184, 149, 106, 0.20); color: var(--gold); }
+  .status-pending { background: rgba(107, 31, 42, 0.10); color: var(--burgundy); }
+
+  /* Priority text colors (todos) */
+  .priority-high   { color: var(--burgundy); font-weight: 600; }
+  .priority-medium { color: var(--gold); font-weight: 500; }
+  .priority-low    { color: var(--ink-soft); }
+
+  /* RSVP colors (guests) */
+  .rsvp-yes     { color: var(--sage); font-weight: 600; }
+  .rsvp-no      { color: var(--burgundy); font-weight: 600; }
+  .rsvp-pending { color: var(--ink-soft); }
+}
+
+/* Empty state ornament — large italic gold mark */
+.empty-ornament {
+  font-family: var(--font-serif);
+  font-size: 64px;
+  color: var(--gold);
+  font-style: italic;
+  line-height: 1;
+}
+
+/* ============ BUDGET ============ */
+.budget-bar {
+  height: 8px;
+  background: var(--cream-deep);
+  border-radius: 100px;
+  overflow: hidden;
+}
+
+.budget-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--burgundy), var(--rose));
+  transition: width 0.6s ease;
+}
+
+.budget-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.budget-table thead { border-bottom: 2px solid var(--ink); }
+.budget-table th {
+  text-align: left;
+  padding: 14px 16px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-weight: 600;
+  color: var(--ink);
+}
+.budget-table th.num,
+.budget-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.budget-table td { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.budget-table tr:hover td { background: var(--cream-deep); }
+
+/* ============ HONEYMOON ============ */
+.destinations-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.dest-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  padding: 24px;
+  border-radius: 4px;
+  position: relative;
+  transition: all 0.25s ease;
+}
+
+.dest-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--gold);
+}
+
+.dest-card .heart {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  font-size: 22px;
+  cursor: pointer;
+  filter: grayscale(1);
+  opacity: 0.4;
+  transition: all 0.2s ease;
+  background: none;
+  border: none;
+  line-height: 1;
+}
+
+.dest-card.favorited .heart { filter: none; opacity: 1; }
+
+.dest-card h4 {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  padding-right: 32px;
+}
+
+.dest-card .location {
+  font-size: 13px;
+  color: var(--ink-soft);
+  margin-bottom: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+}
+
+.dest-card .stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+  padding: 14px 0;
+  border-top: 1px dashed var(--line);
+  border-bottom: 1px dashed var(--line);
+}
+
+.dest-card .stat-mini { font-size: 13px; }
+.dest-card .stat-mini .k {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 9px;
+  color: var(--ink-soft);
+  font-weight: 600;
+  display: block;
+  margin-bottom: 2px;
+}
+.dest-card .stat-mini .v { color: var(--ink); font-weight: 500; }
+
+.dest-card .notes {
+  font-size: 13px;
+  color: var(--ink-soft);
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.dest-card .actions {
+  margin-top: 16px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ============ GUESTS ============ */
+.guest-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.guest-stat {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  padding: 16px;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.guest-stat .v {
+  font-family: var(--font-serif);
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.guest-stat .l {
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-size: 10px;
+  color: var(--ink-soft);
+  margin-top: 6px;
+  font-weight: 500;
+}
+
+.guest-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.filter-chip {
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: 100px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  color: var(--ink-soft);
+  transition: all 0.2s ease;
+}
+
+.filter-chip:hover { border-color: var(--ink); color: var(--ink); }
+.filter-chip.active { background: var(--ink); border-color: var(--ink); color: var(--cream); }
+
+.guest-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.guest-table thead { border-bottom: 2px solid var(--ink); }
+.guest-table th {
+  text-align: left;
+  padding: 14px 12px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-weight: 600;
+}
+.guest-table td { padding: 14px 12px; border-bottom: 1px solid var(--line); }
+.guest-table tr:hover td { background: var(--cream-deep); }
+
+/* ============ APARTMENTS ============ */
+.apt-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 20px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  padding: 24px;
+  border-radius: 4px;
+}
+
+@media (max-width: 768px) {
+  .apt-card { grid-template-columns: 1fr; }
+  .apt-card .right { align-items: flex-start; }
+}
+
+.apt-card .addr { font-size: 13px; color: var(--ink-soft); margin-bottom: 12px; }
+
+.apt-card .specs {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.apt-card .pros { font-size: 13px; color: var(--sage); margin-bottom: 4px; }
+.apt-card .cons { font-size: 13px; color: var(--burgundy); margin-bottom: 4px; }
+
+.apt-card .right {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+  min-width: 120px;
+}
+
+.apt-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  padding: 4px 10px;
+  border-radius: 100px;
+  font-weight: 500;
+}
+
+.apt-status-interested { background: rgba(184, 149, 106, 0.2); color: var(--gold); }
+.apt-status-visited    { background: rgba(138, 154, 123, 0.2); color: var(--sage); }
+.apt-status-rejected   { background: rgba(43, 29, 26, 0.08);   color: var(--ink-soft); }
+.apt-status-applied    { background: rgba(107, 31, 42, 0.15);  color: var(--burgundy); }
