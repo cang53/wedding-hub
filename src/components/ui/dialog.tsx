@@ -32,29 +32,32 @@ const DialogContent = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
-    {/* Scrollable container that scrolls the viewport */}
-    <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden">
-      {/* Flex wrapper to center content on screen */}
-      <div className="flex min-h-full items-center justify-center px-4 py-8 sm:px-6">
-        <DialogPrimitive.Content
-          ref={ref}
-          className={cn(
-            "relative w-full max-w-[540px] flex flex-col",
-            "border border-line bg-paper rounded-[4px] shadow-lifted",
-            "p-6 sm:p-8",
-            "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-            className
-          )}
-          {...props}
-        >
-          {children}
-          <DialogPrimitive.Close className="absolute right-3 top-3 text-ink-soft transition-colors hover:text-ink focus:outline-none focus:ring-2 focus:ring-burgundy rounded-sm p-1">
-            <X className="h-4 w-4" />
-            <span className="sr-only">Close</span>
-          </DialogPrimitive.Close>
-        </DialogPrimitive.Content>
+    <DialogPrimitive.Content
+      ref={ref}
+      className={cn(
+        // Centered on viewport using fixed + transform
+        "fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
+        // Sizing: full width on mobile minus margins, max 540px on desktop
+        "w-[calc(100vw-2rem)] max-w-[540px]",
+        // Height: max 90vh with internal scrolling
+        "max-h-[90vh] flex flex-col",
+        // Visual styling
+        "border border-line bg-paper rounded-[4px] shadow-lifted",
+        // Animations
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+        className
+      )}
+      {...props}
+    >
+      {/* Scrollable inner area — content scrolls, header/footer can stay sticky */}
+      <div className="flex flex-col overflow-y-auto p-6 sm:p-8">
+        {children}
       </div>
-    </div>
+      <DialogPrimitive.Close className="absolute right-3 top-3 z-10 text-ink-soft transition-colors hover:text-ink focus:outline-none focus:ring-2 focus:ring-burgundy rounded-sm p-1 bg-paper">
+        <X className="h-4 w-4" />
+        <span className="sr-only">Close</span>
+      </DialogPrimitive.Close>
+    </DialogPrimitive.Content>
   </DialogPortal>
 ));
 DialogContent.displayName = DialogPrimitive.Content.displayName;
@@ -73,7 +76,7 @@ const DialogFooter = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "mt-8 flex justify-end gap-2.5 border-t border-line pt-6",
+      "mt-6 flex justify-end gap-2.5 border-t border-line pt-5",
       className
     )}
     {...props}
@@ -88,8 +91,7 @@ const DialogTitle = React.forwardRef<
   <DialogPrimitive.Title
     ref={ref}
     className={cn(
-      "font-serif text-[32px] font-medium leading-none text-ink",
-      // <em> children get the burgundy italic accent via globals.css
+      "font-serif text-[28px] font-medium leading-tight text-ink",
       className
     )}
     {...props}
