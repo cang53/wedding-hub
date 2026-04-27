@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { WeddingDayEventRow } from "@/types/db";
+import type { WeddingDayEventRow, WeddingDayAssignee } from "@/types/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,7 +29,7 @@ type Phase = {
   emoji: string;
   startHour: number;
   endHour: number;
-  color: string; // CSS variable / class name
+  color: string;
   description: string;
 };
 
@@ -40,6 +40,21 @@ const PHASES: Phase[] = [
   { key: "reception", label: "Reception & Dinner", emoji: "🍽️", startHour: 18, endHour: 21, color: "sage", description: "Speeches, food, toasts" },
   { key: "party", label: "Party & Dancing", emoji: "🎉", startHour: 21, endHour: 26, color: "ink", description: "Let's celebrate!" },
 ];
+
+// View modes for dual perspective
+type ViewMode = "all" | "bride" | "groom";
+
+const VIEW_MODES: { key: ViewMode; label: string; emoji: string }[] = [
+  { key: "all", label: "Both", emoji: "💑" },
+  { key: "bride", label: "Bride", emoji: "👰" },
+  { key: "groom", label: "Groom", emoji: "🤵" },
+];
+
+const ASSIGNEE_META: Record<WeddingDayAssignee, { emoji: string; label: string; shortLabel: string }> = {
+  bride: { emoji: "👰", label: "Bride only", shortLabel: "Bride" },
+  groom: { emoji: "🤵", label: "Groom only", shortLabel: "Groom" },
+  both: { emoji: "💑", label: "Both partners", shortLabel: "Both" },
+};
 
 function parseTime(timeStr: string): number {
   const [h, m] = timeStr.split(":").map(Number);
@@ -84,7 +99,14 @@ type Template = {
   name: string;
   emoji: string;
   description: string;
-  events: Array<{ title: string; start_time: string; end_time: string; location?: string; notes?: string }>;
+  events: Array<{
+    title: string;
+    start_time: string;
+    end_time: string;
+    location?: string;
+    notes?: string;
+    assignee?: WeddingDayAssignee;
+  }>;
 };
 
 const TEMPLATES: Template[] = [
@@ -94,18 +116,18 @@ const TEMPLATES: Template[] = [
     emoji: "💒",
     description: "Traditional schedule from morning prep to evening party",
     events: [
-      { title: "Hair & Makeup", start_time: "08:00", end_time: "11:00", location: "Bridal Suite", notes: "Bride + bridesmaids" },
-      { title: "Groom Preparation", start_time: "10:00", end_time: "11:30", location: "Hotel Room" },
-      { title: "First Look", start_time: "12:00", end_time: "12:30", location: "Garden", notes: "Private moment with photographer" },
-      { title: "Ceremony", start_time: "13:00", end_time: "14:00", location: "Chapel", notes: "Guests arrive 30min early" },
-      { title: "Cocktail Hour", start_time: "14:00", end_time: "15:30", location: "Terrace" },
-      { title: "Family Photos", start_time: "14:30", end_time: "15:30", location: "Garden" },
-      { title: "Reception & Dinner", start_time: "16:00", end_time: "19:00", location: "Ballroom" },
-      { title: "Speeches & Toasts", start_time: "18:00", end_time: "18:45", location: "Ballroom" },
-      { title: "First Dance", start_time: "19:30", end_time: "19:45", location: "Dance Floor" },
-      { title: "Cake Cutting", start_time: "20:00", end_time: "20:15", location: "Ballroom" },
-      { title: "Dancing & Party", start_time: "20:30", end_time: "23:30", location: "Dance Floor" },
-      { title: "Send-off", start_time: "23:30", end_time: "00:00", location: "Entrance", notes: "Sparklers!" },
+      { title: "Hair & Makeup", start_time: "08:00", end_time: "11:00", location: "Bridal Suite", notes: "Bride + bridesmaids", assignee: "bride" },
+      { title: "Groom Preparation", start_time: "10:00", end_time: "11:30", location: "Hotel Room", assignee: "groom" },
+      { title: "First Look", start_time: "12:00", end_time: "12:30", location: "Garden", notes: "Private moment with photographer", assignee: "both" },
+      { title: "Ceremony", start_time: "13:00", end_time: "14:00", location: "Chapel", notes: "Guests arrive 30min early", assignee: "both" },
+      { title: "Cocktail Hour", start_time: "14:00", end_time: "15:30", location: "Terrace", assignee: "both" },
+      { title: "Family Photos", start_time: "14:30", end_time: "15:30", location: "Garden", assignee: "both" },
+      { title: "Reception & Dinner", start_time: "16:00", end_time: "19:00", location: "Ballroom", assignee: "both" },
+      { title: "Speeches & Toasts", start_time: "18:00", end_time: "18:45", location: "Ballroom", assignee: "both" },
+      { title: "First Dance", start_time: "19:30", end_time: "19:45", location: "Dance Floor", assignee: "both" },
+      { title: "Cake Cutting", start_time: "20:00", end_time: "20:15", location: "Ballroom", assignee: "both" },
+      { title: "Dancing & Party", start_time: "20:30", end_time: "23:30", location: "Dance Floor", assignee: "both" },
+      { title: "Send-off", start_time: "23:30", end_time: "00:00", location: "Entrance", notes: "Sparklers!", assignee: "both" },
     ],
   },
   {
@@ -114,11 +136,12 @@ const TEMPLATES: Template[] = [
     emoji: "✨",
     description: "Smaller, simpler, more relaxed",
     events: [
-      { title: "Getting Ready", start_time: "10:00", end_time: "13:00", location: "Bridal Suite" },
-      { title: "Ceremony", start_time: "14:00", end_time: "14:30", location: "Garden", notes: "Short and meaningful" },
-      { title: "Photos with Family", start_time: "14:30", end_time: "15:30", location: "Garden" },
-      { title: "Lunch Reception", start_time: "16:00", end_time: "19:00", location: "Restaurant" },
-      { title: "Toasts & Cake", start_time: "18:00", end_time: "18:45" },
+      { title: "Bride Getting Ready", start_time: "10:00", end_time: "13:00", location: "Bridal Suite", assignee: "bride" },
+      { title: "Groom Getting Ready", start_time: "11:00", end_time: "13:00", location: "Suite", assignee: "groom" },
+      { title: "Ceremony", start_time: "14:00", end_time: "14:30", location: "Garden", notes: "Short and meaningful", assignee: "both" },
+      { title: "Photos with Family", start_time: "14:30", end_time: "15:30", location: "Garden", assignee: "both" },
+      { title: "Lunch Reception", start_time: "16:00", end_time: "19:00", location: "Restaurant", assignee: "both" },
+      { title: "Toasts & Cake", start_time: "18:00", end_time: "18:45", assignee: "both" },
     ],
   },
   {
@@ -127,12 +150,13 @@ const TEMPLATES: Template[] = [
     emoji: "🌙",
     description: "Late ceremony with reception into the night",
     events: [
-      { title: "Bridal Prep", start_time: "14:00", end_time: "16:30", location: "Suite" },
-      { title: "First Look & Photos", start_time: "16:30", end_time: "17:30" },
-      { title: "Ceremony", start_time: "18:00", end_time: "18:45", location: "Venue" },
-      { title: "Cocktail Hour", start_time: "18:45", end_time: "20:00" },
-      { title: "Dinner", start_time: "20:00", end_time: "22:00" },
-      { title: "Dancing", start_time: "22:00", end_time: "01:00" },
+      { title: "Bridal Prep", start_time: "14:00", end_time: "16:30", location: "Suite", assignee: "bride" },
+      { title: "Groom Prep", start_time: "15:00", end_time: "16:30", location: "Suite", assignee: "groom" },
+      { title: "First Look & Photos", start_time: "16:30", end_time: "17:30", assignee: "both" },
+      { title: "Ceremony", start_time: "18:00", end_time: "18:45", location: "Venue", assignee: "both" },
+      { title: "Cocktail Hour", start_time: "18:45", end_time: "20:00", assignee: "both" },
+      { title: "Dinner", start_time: "20:00", end_time: "22:00", assignee: "both" },
+      { title: "Dancing", start_time: "22:00", end_time: "01:00", assignee: "both" },
     ],
   },
 ];
@@ -149,8 +173,17 @@ export function WeddingDayClient({ initialItems }: Props) {
   const [items, setItems] = useState<WeddingDayEventRow[]>(initialItems);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<WeddingDayEventRow | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("all");
   const [, startTransition] = useTransition();
   const [now, setNow] = useState<Date | null>(null);
+
+  // Read view mode from localStorage on mount (sync with role choice)
+  useEffect(() => {
+    const role = localStorage.getItem("wedding-role") as ViewMode | null;
+    if (role === "bride" || role === "groom") {
+      setViewMode(role);
+    }
+  }, []);
 
   // Update "now" every minute for live indicator
   useEffect(() => {
@@ -180,9 +213,15 @@ export function WeddingDayClient({ initialItems }: Props) {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  // Filter by view mode (bride sees bride+both, groom sees groom+both, all sees all)
+  const filteredItems = useMemo(() => {
+    if (viewMode === "all") return items;
+    return items.filter((i) => i.assignee === viewMode || i.assignee === "both");
+  }, [items, viewMode]);
+
   const sorted = useMemo(
-    () => [...items].sort((a, b) => parseTime(a.start_time) - parseTime(b.start_time)),
-    [items]
+    () => [...filteredItems].sort((a, b) => parseTime(a.start_time) - parseTime(b.start_time)),
+    [filteredItems]
   );
 
   // Group by phase
@@ -198,7 +237,7 @@ export function WeddingDayClient({ initialItems }: Props) {
     return Array.from(groups.values());
   }, [sorted]);
 
-  // Smart insights
+  // Smart insights (over filtered items)
   const insights = useMemo(() => {
     if (sorted.length === 0) return null;
 
@@ -207,7 +246,6 @@ export function WeddingDayClient({ initialItems }: Props) {
     const dayEnd = sorted[sorted.length - 1];
     const dayLength = durationMinutes(dayStart.start_time, dayEnd.end_time);
 
-    // Find gaps between consecutive events
     const gaps: Array<{ after: WeddingDayEventRow; before: WeddingDayEventRow; minutes: number }> = [];
     for (let i = 0; i < sorted.length - 1; i++) {
       const gap = durationMinutes(sorted[i].end_time, sorted[i + 1].start_time);
@@ -216,7 +254,6 @@ export function WeddingDayClient({ initialItems }: Props) {
       }
     }
 
-    // Find overlaps
     const overlaps: Array<{ a: WeddingDayEventRow; b: WeddingDayEventRow }> = [];
     for (let i = 0; i < sorted.length - 1; i++) {
       if (parseTime(sorted[i].end_time) > parseTime(sorted[i + 1].start_time)) {
@@ -227,11 +264,16 @@ export function WeddingDayClient({ initialItems }: Props) {
     return { totalDuration, dayLength, dayStart, dayEnd, gaps, overlaps };
   }, [sorted]);
 
-  // Days until wedding
+  // Counts per assignee for the view mode tabs
+  const counts = useMemo(() => ({
+    all: items.length,
+    bride: items.filter((i) => i.assignee === "bride" || i.assignee === "both").length,
+    groom: items.filter((i) => i.assignee === "groom" || i.assignee === "both").length,
+  }), [items]);
+
   const days = daysUntil(WEDDING_DATE);
   const isWeddingDay = days === 0;
 
-  // Find currently happening event (only if it's the wedding day)
   const currentEvent = useMemo(() => {
     if (!isWeddingDay || !now) return null;
     const currentTime = now.getHours() + now.getMinutes() / 60;
@@ -242,7 +284,6 @@ export function WeddingDayClient({ initialItems }: Props) {
     });
   }, [sorted, now, isWeddingDay]);
 
-  // Find next upcoming event
   const nextEvent = useMemo(() => {
     if (!isWeddingDay || !now) return null;
     const currentTime = now.getHours() + now.getMinutes() / 60;
@@ -266,17 +307,24 @@ export function WeddingDayClient({ initialItems }: Props) {
       fd.set("end_time", event.end_time);
       fd.set("location", event.location ?? "");
       fd.set("notes", event.notes ?? "");
+      fd.set("assignee", event.assignee ?? "both");
       const result = await createWeddingDayEvent(null, fd);
-      if ("data" in result && result.data) {
-        setItems((prev) => prev.some((i) => i.id === result.data.id) ? prev : [...prev, result.data]);
+      if (result && "data" in result && result.data) {
+        const created = result.data;
+        setItems((prev) => prev.some((i) => i.id === created.id) ? prev : [...prev, created]);
       }
     }
+  };
+
+  const handleAddEvent = () => {
+    setEditing(null);
+    setDialogOpen(true);
   };
 
   return (
     <section className="animate-in fade-in slide-in-from-bottom-2 duration-300">
       {/* Header */}
-      <div className="flex items-end justify-between mb-8 pb-5 border-b border-line max-md:flex-col max-md:items-start max-md:gap-4">
+      <div className="flex items-end justify-between mb-6 pb-5 border-b border-line max-md:flex-col max-md:items-start max-md:gap-4">
         <div>
           <h2 className="font-serif text-[42px] font-normal leading-none tracking-[-0.01em] mb-2">
             The <em>wedding day</em>
@@ -290,9 +338,33 @@ export function WeddingDayClient({ initialItems }: Props) {
           </p>
         </div>
         {items.length > 0 && (
-          <Button onClick={() => { setEditing(null); setDialogOpen(true); }}>+ Add event</Button>
+          <Button onClick={handleAddEvent}>+ Add event</Button>
         )}
       </div>
+
+      {/* View mode tabs (bride/groom/both) */}
+      {items.length > 0 && (
+        <div className="mb-6 flex items-center gap-2 max-md:flex-wrap">
+          <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft mr-2">View:</span>
+          {VIEW_MODES.map((mode) => (
+            <button
+              key={mode.key}
+              onClick={() => setViewMode(mode.key)}
+              className={`
+                flex items-center gap-2 px-4 py-2 rounded-[4px] border transition-all text-[13px]
+                ${viewMode === mode.key
+                  ? "border-burgundy bg-burgundy/5 text-ink font-medium"
+                  : "border-line text-ink-soft hover:border-ink hover:text-ink"
+                }
+              `}
+            >
+              <span>{mode.emoji}</span>
+              <span>{mode.label}</span>
+              <span className="text-[11px] text-ink-soft">({counts[mode.key]})</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* "Now" banner — only on wedding day */}
       {isWeddingDay && (currentEvent || nextEvent) && (
@@ -327,7 +399,13 @@ export function WeddingDayClient({ initialItems }: Props) {
 
       {/* Empty state with templates */}
       {items.length === 0 ? (
-        <EmptyState onApplyTemplate={handleApplyTemplate} onAddManual={() => { setEditing(null); setDialogOpen(true); }} />
+        <EmptyState onApplyTemplate={handleApplyTemplate} onAddManual={handleAddEvent} />
+      ) : sorted.length === 0 ? (
+        // Filtered to nothing
+        <div className="text-center py-16 text-ink-soft">
+          <div className="font-serif text-[24px] italic mb-2">No events for this view</div>
+          <p className="text-sm">Switch to another view or add events for {viewMode === "bride" ? "the bride" : "the groom"}.</p>
+        </div>
       ) : (
         <>
           {/* Stats bar */}
@@ -335,7 +413,7 @@ export function WeddingDayClient({ initialItems }: Props) {
             <div className="grid grid-cols-4 gap-4 mb-8 max-md:grid-cols-2 max-sm:grid-cols-1">
               <StatCard
                 label="Events"
-                value={String(items.length)}
+                value={String(sorted.length)}
                 meta={`${formatDuration(insights.totalDuration)} of activity`}
               />
               <StatCard
@@ -412,17 +490,25 @@ export function WeddingDayClient({ initialItems }: Props) {
         </>
       )}
 
-      <WeddingDayDialog
-        open={dialogOpen}
-        onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditing(null); }}
-        editing={editing}
-        onEventAdded={(event) => {
-          setItems((prev) => prev.some((i) => i.id === event.id) ? prev : [...prev, event]);
-        }}
-        onEventUpdated={(event) => {
-          setItems((prev) => prev.map((i) => (i.id === event.id ? event : i)));
-        }}
-      />
+      {/*
+        KEY FIX: Force a fresh dialog/form mount each time it opens by keying
+        on the editing id (or "new"). This guarantees useActionState resets
+        and stale data from a previous submission can't leak through.
+      */}
+      {dialogOpen && (
+        <WeddingDayDialog
+          key={editing?.id ?? "new"}
+          open={dialogOpen}
+          onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditing(null); }}
+          editing={editing}
+          onEventAdded={(event) => {
+            setItems((prev) => prev.some((i) => i.id === event.id) ? prev : [...prev, event]);
+          }}
+          onEventUpdated={(event) => {
+            setItems((prev) => prev.map((i) => (i.id === event.id ? event : i)));
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -456,7 +542,6 @@ function PhaseSection({
 }) {
   return (
     <div>
-      {/* Phase header */}
       <div className="flex items-center gap-3 mb-4">
         <span className="text-[24px]">{phase.emoji}</span>
         <div>
@@ -469,7 +554,6 @@ function PhaseSection({
         </span>
       </div>
 
-      {/* Events in this phase */}
       <div className="space-y-3 ml-1">
         {events.map((event) => (
           <EventCard
@@ -500,8 +584,8 @@ function EventCard({
   onDelete: () => void;
 }) {
   const duration = durationMinutes(event.start_time, event.end_time);
+  const assignee = event.assignee ?? "both";
 
-  // Map phase color to bg/border classes
   const colorMap: Record<string, { border: string; bg: string; accent: string }> = {
     rose: { border: "border-l-rose", bg: "hover:bg-rose/5", accent: "text-rose" },
     burgundy: { border: "border-l-burgundy", bg: "hover:bg-burgundy/5", accent: "text-burgundy" },
@@ -523,13 +607,25 @@ function EventCard({
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          {/* Time and duration */}
-          <div className="flex items-baseline gap-2 mb-2">
+          <div className="flex items-baseline gap-2 mb-2 flex-wrap">
             <span className={`font-mono text-[15px] font-medium ${colors.accent}`}>
               {formatTime(event.start_time)} – {formatTime(event.end_time)}
             </span>
             <span className="text-[11px] text-ink-soft uppercase tracking-[0.2em]">
               {formatDuration(duration)}
+            </span>
+            {/* Assignee badge */}
+            <span
+              className={`
+                text-[11px] px-2 py-0.5 rounded-full border inline-flex items-center gap-1
+                ${assignee === "bride" ? "border-rose text-rose bg-rose/5" : ""}
+                ${assignee === "groom" ? "border-sage text-sage bg-sage/5" : ""}
+                ${assignee === "both" ? "border-line text-ink-soft bg-cream" : ""}
+              `}
+              title={ASSIGNEE_META[assignee].label}
+            >
+              <span>{ASSIGNEE_META[assignee].emoji}</span>
+              <span>{ASSIGNEE_META[assignee].shortLabel}</span>
             </span>
             {isCurrent && (
               <span className="text-[10px] uppercase tracking-[0.3em] text-burgundy font-bold animate-pulse">
@@ -538,19 +634,16 @@ function EventCard({
             )}
           </div>
 
-          {/* Title */}
           <h4 className="font-serif text-[20px] text-ink mb-1 leading-tight">
             {event.title}
           </h4>
 
-          {/* Location */}
           {event.location && (
             <div className="text-[13px] text-ink-soft mb-1">
               📍 {event.location}
             </div>
           )}
 
-          {/* Notes */}
           {event.notes && (
             <div className="text-[13px] text-ink-soft mt-2 italic line-clamp-2">
               {event.notes}
@@ -558,7 +651,6 @@ function EventCard({
           )}
         </div>
 
-        {/* Delete button */}
         <button
           type="button"
           aria-label="Delete event"
@@ -588,7 +680,6 @@ function EmptyState({
         Start with a template to instantly map out your day, or build it event by event.
       </p>
 
-      {/* Template cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl mx-auto mb-8">
         {TEMPLATES.map((template) => (
           <button
@@ -610,7 +701,6 @@ function EmptyState({
         ))}
       </div>
 
-      {/* Or start blank */}
       <div className="flex items-center justify-center gap-4">
         <div className="border-t border-line w-16" />
         <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft">or</span>
@@ -642,11 +732,21 @@ function WeddingDayDialog({
   onEventUpdated: (event: WeddingDayEventRow) => void;
 }) {
   const action = editing ? updateWeddingDayEvent.bind(null, editing.id) : createWeddingDayEvent;
-  const [state, formAction, pending] = useActionState<{ error?: string; ok?: true; data?: WeddingDayEventRow } | null, FormData>(action, null);
+  const [state, formAction, pending] = useActionState<
+    { error?: string; ok?: true; data?: WeddingDayEventRow } | null,
+    FormData
+  >(action, null);
+
+  // Track which assignee is selected (controlled to support pill buttons)
+  const [assignee, setAssignee] = useState<WeddingDayAssignee>(editing?.assignee ?? "both");
 
   useEffect(() => {
     if (state?.ok && state?.data) {
-      editing ? onEventUpdated(state.data) : onEventAdded(state.data);
+      if (editing) {
+        onEventUpdated(state.data);
+      } else {
+        onEventAdded(state.data);
+      }
       onOpenChange(false);
     }
   }, [state, onOpenChange, editing, onEventAdded, onEventUpdated]);
@@ -654,7 +754,6 @@ function WeddingDayDialog({
   const startDefault = editing ? formatTime(editing.start_time) : "";
   const endDefault = editing ? formatTime(editing.end_time) : "";
 
-  // Quick-pick suggestions
   const suggestions = [
     "Hair & Makeup", "Ceremony", "First Look", "Family Photos",
     "Cocktail Hour", "Dinner", "Speeches", "First Dance",
@@ -707,6 +806,37 @@ function WeddingDayDialog({
             <div className="flex flex-col gap-2">
               <Label htmlFor="end_time">End time</Label>
               <Input id="end_time" name="end_time" type="time" defaultValue={endDefault} required />
+            </div>
+          </div>
+
+          {/* Assignee selector */}
+          <div className="flex flex-col gap-2">
+            <Label>Who's involved?</Label>
+            <input type="hidden" name="assignee" value={assignee} />
+            <div className="grid grid-cols-3 gap-2">
+              {(["bride", "both", "groom"] as WeddingDayAssignee[]).map((opt) => {
+                const meta = ASSIGNEE_META[opt];
+                const active = assignee === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setAssignee(opt)}
+                    className={`
+                      flex flex-col items-center justify-center gap-1 p-3 rounded-[4px] border-2 transition-all
+                      ${active
+                        ? "border-burgundy bg-burgundy/5"
+                        : "border-line hover:border-ink/40"
+                      }
+                    `}
+                  >
+                    <span className="text-[24px]">{meta.emoji}</span>
+                    <span className={`text-[12px] ${active ? "text-ink font-medium" : "text-ink-soft"}`}>
+                      {meta.shortLabel}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 

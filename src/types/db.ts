@@ -113,6 +113,8 @@ export interface ApartmentRow {
   updated_at: string;
 }
 
+export type WeddingDayAssignee = "bride" | "groom" | "both";
+
 export interface WeddingDayEventRow {
   id: string;
   title: string;
@@ -120,6 +122,7 @@ export interface WeddingDayEventRow {
   end_time: string;
   location: string | null;
   notes: string | null;
+  assignee: WeddingDayAssignee;
   created_at: string;
   updated_at: string;
 }
@@ -314,6 +317,7 @@ export type Database = {
           end_time: string;
           location?: string | null;
           notes?: string | null;
+          assignee?: WeddingDayAssignee;
           created_at?: string;
           updated_at?: string;
         };
@@ -324,6 +328,7 @@ export type Database = {
           end_time?: string;
           location?: string | null;
           notes?: string | null;
+          assignee?: WeddingDayAssignee;
           created_at?: string;
           updated_at?: string;
         };
