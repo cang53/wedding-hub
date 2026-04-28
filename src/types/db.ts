@@ -25,6 +25,7 @@ export type TodoCategory = "wedding" | "honeymoon" | "home" | "personal";
 export type TodoPriority = "low" | "medium" | "high";
 
 export type BudgetStatus = "pending" | "deposit" | "paid";
+export type BudgetPayer = "bride" | "groom" | "both";
 
 export type GuestSide = "bride" | "groom" | "both";
 export type GuestRsvp = "pending" | "yes" | "no";
@@ -63,6 +64,8 @@ export interface BudgetRow {
   vendor: string | null;
   estimated: number | null;
   paid: number | null;
+  payer: BudgetPayer;
+  payer_groom_pct: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -204,6 +207,8 @@ export type Database = {
           vendor?: string | null;
           estimated?: number | null;
           paid?: number | null;
+          payer?: BudgetPayer;
+          payer_groom_pct?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -215,6 +220,8 @@ export type Database = {
           vendor?: string | null;
           estimated?: number | null;
           paid?: number | null;
+          payer?: BudgetPayer;
+          payer_groom_pct?: number | null;
           created_at?: string;
           updated_at?: string;
         };

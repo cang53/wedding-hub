@@ -710,6 +710,7 @@ function ExpensesView({
                   <th>Item</th>
                   <th>Category</th>
                   <th>Status</th>
+                  <th>Payer</th>
                   <th className="num">Estimated</th>
                   <th className="num">Paid</th>
                   <th></th>
@@ -733,6 +734,11 @@ function ExpensesView({
                     <td>{b.category ?? "—"}</td>
                     <td>
                       <span className={`status-pill status-${b.status}`}>{b.status}</span>
+                    </td>
+                    <td>
+                      {b.payer === "both"
+                        ? `Both (${b.payer_groom_pct ?? 50}% groom)`
+                        : b.payer === "bride" ? "Bride" : "Groom"}
                     </td>
                     <td className="num">{formatMoney(b.estimated)}</td>
                     <td className="num">{formatMoney(b.paid)}</td>
@@ -1048,12 +1054,24 @@ function BudgetDialog({
     FormData
   >(action, null);
 
+  const [payer, setPayer] = useState<"bride" | "groom" | "both">(editing?.payer ?? "both");
+
+  useEffect(() => {
+    setPayer(editing?.payer ?? "both");
+  }, [editing]);
+
   useEffect(() => {
     if (state?.ok && state?.data) {
       onSaved(state.data);
       onOpenChange(false);
     }
   }, [state, onOpenChange, onSaved]);
+
+  const PAYER_OPTIONS = [
+    { value: "both", label: "Both" },
+    { value: "bride", label: "Bride" },
+    { value: "groom", label: "Groom" },
+  ];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1102,6 +1120,35 @@ function BudgetDialog({
               <Label htmlFor="paid">Already paid (€)</Label>
               <Input id="paid" name="paid" type="number" min="0" step="1" defaultValue={editing?.paid ?? "0"} />
             </div>
+          </div>
+
+          <div className={`grid gap-3.5 max-md:grid-cols-1 ${payer === "both" ? "grid-cols-2" : "grid-cols-1"}`}>
+            <div className="flex flex-col gap-2">
+              <Label>Who pays?</Label>
+              <input type="hidden" name="payer" value={payer} />
+              <Select value={payer} onValueChange={(v) => setPayer(v as typeof payer)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PAYER_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {payer === "both" && (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="payer_groom_pct">Groom&rsquo;s share (%)</Label>
+                <Input
+                  id="payer_groom_pct"
+                  name="payer_groom_pct"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  defaultValue={editing?.payer_groom_pct ?? 50}
+                />
+              </div>
+            )}
           </div>
 
           {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
