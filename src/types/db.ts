@@ -32,6 +32,8 @@ export type GuestRsvp = "pending" | "yes" | "no";
 
 export type ApartmentStatus = "interested" | "visited" | "applied" | "rejected";
 
+export type SavingsContributor = "bride" | "groom" | "both";
+
 // ====== Row shapes ===============================================================
 
 export interface TodoRow {
@@ -124,6 +126,7 @@ export interface WeddingSavingsRow {
   saved_on: string; // YYYY-MM-DD
   source: string | null;
   notes: string | null;
+  contributor: SavingsContributor;
   created_at: string;
   updated_at: string;
 }
@@ -359,6 +362,7 @@ export type Database = {
           saved_on?: string;
           source?: string | null;
           notes?: string | null;
+          contributor?: SavingsContributor;
           created_at?: string;
           updated_at?: string;
         };
@@ -368,6 +372,7 @@ export type Database = {
           saved_on?: string;
           source?: string | null;
           notes?: string | null;
+          contributor?: SavingsContributor;
           created_at?: string;
           updated_at?: string;
         };

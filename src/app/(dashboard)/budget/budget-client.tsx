@@ -219,6 +219,59 @@ export function BudgetClient({ initialBudget, initialSavings }: Props) {
     return series;
   }, [savings]);
 
+  // Per-person breakdown for the "Per Person" overview toggle
+  const perPerson = useMemo(() => {
+    const groomSavings = savings.reduce((a, s) => {
+      if (s.contributor === "groom") return a + s.amount;
+      if (s.contributor === "both") return a + s.amount * 0.5;
+      return a;
+    }, 0);
+    const brideSavings = savings.reduce((a, s) => {
+      if (s.contributor === "bride") return a + s.amount;
+      if (s.contributor === "both") return a + s.amount * 0.5;
+      return a;
+    }, 0);
+
+    const groomObligations = budget.reduce((a, b) => {
+      if (b.payer === "groom") return a + (b.estimated ?? 0);
+      if (b.payer === "both") return a + (b.estimated ?? 0) * (b.payer_groom_pct ?? 50) / 100;
+      return a;
+    }, 0);
+    const brideObligations = budget.reduce((a, b) => {
+      if (b.payer === "bride") return a + (b.estimated ?? 0);
+      if (b.payer === "both") return a + (b.estimated ?? 0) * (1 - (b.payer_groom_pct ?? 50) / 100);
+      return a;
+    }, 0);
+
+    const groomPaid = budget.reduce((a, b) => {
+      if (b.payer === "groom") return a + (b.paid ?? 0);
+      if (b.payer === "both") return a + (b.paid ?? 0) * (b.payer_groom_pct ?? 50) / 100;
+      return a;
+    }, 0);
+    const bridePaid = budget.reduce((a, b) => {
+      if (b.payer === "bride") return a + (b.paid ?? 0);
+      if (b.payer === "both") return a + (b.paid ?? 0) * (1 - (b.payer_groom_pct ?? 50) / 100);
+      return a;
+    }, 0);
+
+    return {
+      groom: {
+        savings: groomSavings,
+        obligations: groomObligations,
+        paid: groomPaid,
+        net: groomSavings - groomObligations,
+        coveragePct: groomObligations > 0 ? Math.min(100, (groomSavings / groomObligations) * 100) : 0,
+      },
+      bride: {
+        savings: brideSavings,
+        obligations: brideObligations,
+        paid: bridePaid,
+        net: brideSavings - brideObligations,
+        coveragePct: brideObligations > 0 ? Math.min(100, (brideSavings / brideObligations) * 100) : 0,
+      },
+    };
+  }, [budget, savings]);
+
   // ---- Actions -------------------------------------------------------------
   const handleDeleteBudget = (item: BudgetRow) => {
     if (!confirm(`Delete "${item.name}"?`)) return;
@@ -287,6 +340,7 @@ export function BudgetClient({ initialBudget, initialSavings }: Props) {
           monthlySavings={monthlySavings}
           recentSavings={savings.slice(0, 5)}
           recentBudget={[...budget].sort((a, b) => (b.created_at > a.created_at ? 1 : -1)).slice(0, 5)}
+          perPerson={perPerson}
         />
       )}
 
@@ -348,24 +402,121 @@ export function BudgetClient({ initialBudget, initialSavings }: Props) {
 // Overview view — the "where do we stand" dashboard
 // ============================================================================
 
+type PersonStats = {
+  savings: number;
+  obligations: number;
+  paid: number;
+  net: number;
+  coveragePct: number;
+};
+
+function PersonCard({ name, accent, stats }: {
+  name: string;
+  accent: "sage" | "rose";
+  stats: PersonStats;
+}) {
+  const accentBorder = accent === "sage" ? "border-l-sage" : "border-l-rose";
+  const accentText = accent === "sage" ? "text-sage" : "text-rose";
+  const accentBg = accent === "sage" ? "bg-sage" : "bg-rose";
+  const noData = stats.obligations === 0 && stats.savings === 0;
+
+  return (
+    <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] p-6 shadow-soft space-y-4`}>
+      <div className={`text-[11px] uppercase tracking-[0.3em] font-medium ${accentText}`}>{name}</div>
+
+      {noData ? (
+        <p className="text-[13px] italic text-ink-soft">No data yet — tag expenses and savings to this person.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Saved</div>
+              <div className="font-serif text-[22px] text-ink leading-none"><em>{formatMoney(stats.savings)}</em></div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Obligations</div>
+              <div className="font-serif text-[22px] text-ink leading-none"><em>{formatMoney(stats.obligations)}</em></div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Paid so far</div>
+              <div className="font-mono text-[14px] text-ink">{formatMoney(stats.paid)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Net</div>
+              <div className={`font-mono text-[14px] ${stats.net >= 0 ? accentText : "text-burgundy"}`}>
+                {stats.net >= 0 ? "+" : ""}{formatMoney(stats.net)}
+              </div>
+            </div>
+          </div>
+
+          {stats.obligations > 0 && (
+            <div>
+              <div className="flex justify-between text-[10px] text-ink-soft mb-1.5">
+                <span>Coverage</span>
+                <span>{stats.coveragePct.toFixed(0)}%</span>
+              </div>
+              <div className="h-2 bg-cream-deep rounded-full overflow-hidden">
+                <div
+                  className={`h-full ${accentBg} transition-all duration-700`}
+                  style={{ width: `${stats.coveragePct}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function OverviewView({
   totals,
   byCategory,
   monthlySavings,
   recentSavings,
   recentBudget,
+  perPerson,
 }: {
   totals: ReturnType<typeof computeTotalsType>;
   byCategory: { category: string; estimated: number; paid: number }[];
   monthlySavings: { key: string; label: string; amount: number }[];
   recentSavings: WeddingSavingsRow[];
   recentBudget: BudgetRow[];
+  perPerson: { groom: PersonStats; bride: PersonStats };
 }) {
+  const [viewMode, setViewMode] = useState<"combined" | "per-person">("combined");
   const onTrack = totals.targetPerMonth <= totals.avgMonthly && totals.estimated > 0;
   const noData = totals.estimated === 0 && totals.saved === 0;
 
   return (
     <div className="space-y-8">
+      {/* View mode toggle */}
+      <div className="flex gap-1 p-1 bg-cream-deep rounded-[6px] w-fit">
+        {(["combined", "per-person"] as const).map((mode) => (
+          <button
+            key={mode}
+            onClick={() => setViewMode(mode)}
+            className={`px-4 py-2 rounded-[4px] text-[12px] transition-all ${
+              viewMode === mode
+                ? "bg-paper text-ink shadow-soft font-medium"
+                : "text-ink-soft hover:text-ink"
+            }`}
+          >
+            {mode === "combined" ? "Combined" : "Per Person"}
+          </button>
+        ))}
+      </div>
+
+      {/* Per-person panel */}
+      {viewMode === "per-person" && (
+        <div className="grid grid-cols-2 gap-5 max-md:grid-cols-1">
+          <PersonCard name="Groom" accent="sage" stats={perPerson.groom} />
+          <PersonCard name="Bride" accent="rose" stats={perPerson.bride} />
+        </div>
+      )}
+      {/* Combined view */}
+      {viewMode === "combined" && <>
+
       {/* Hero KPIs */}
       <div className="grid grid-cols-4 gap-4 max-md:grid-cols-2 max-sm:grid-cols-1">
         <KPI
@@ -536,6 +687,8 @@ function OverviewView({
           </div>
         </>
       )}
+
+      </>}
     </div>
   );
 }
@@ -640,6 +793,13 @@ function SavingsView({
                         {s.notes && <span className="ml-2 italic">· {s.notes}</span>}
                       </div>
                     </div>
+                    <span className={`text-[10px] uppercase tracking-[0.15em] px-2 py-0.5 rounded-full border shrink-0 ${
+                      s.contributor === "groom" ? "border-sage/50 text-sage bg-sage/10" :
+                      s.contributor === "bride" ? "border-rose/50 text-rose bg-rose/10" :
+                      "border-gold/50 text-gold bg-gold/10"
+                    }`}>
+                      {s.contributor === "both" ? "Joint" : s.contributor}
+                    </span>
                     <div className="font-mono text-sage font-medium">+{formatMoney(s.amount)}</div>
                     <button
                       type="button"
@@ -1187,6 +1347,12 @@ function SavingsDialog({
   const todayIso = new Date().toISOString().slice(0, 10);
   const defaultDate = editing?.saved_on ?? todayIso;
 
+  const CONTRIBUTOR_OPTIONS = [
+    { value: "both", label: "Both" },
+    { value: "groom", label: "Groom" },
+    { value: "bride", label: "Bride" },
+  ];
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -1217,13 +1383,23 @@ function SavingsDialog({
             </div>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <Label>Source (optional)</Label>
-            <SelectField
-              name="source"
-              defaultValue={editing?.source ?? "Joint savings"}
-              options={SAVINGS_SOURCES.map((s) => ({ value: s, label: s }))}
-            />
+          <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
+            <div className="flex flex-col gap-2">
+              <Label>Source (optional)</Label>
+              <SelectField
+                name="source"
+                defaultValue={editing?.source ?? "Joint savings"}
+                options={SAVINGS_SOURCES.map((s) => ({ value: s, label: s }))}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>Saved by</Label>
+              <SelectField
+                name="contributor"
+                defaultValue={editing?.contributor ?? "both"}
+                options={CONTRIBUTOR_OPTIONS}
+              />
+            </div>
           </div>
 
           <div className="flex flex-col gap-2">
