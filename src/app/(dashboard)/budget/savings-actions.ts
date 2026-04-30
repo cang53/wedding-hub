@@ -1,6 +1,9 @@
 "use server";
 
 import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
+import type { SavingsContributor } from "@/types/db";
+
+const VALID_CONTRIBUTORS: SavingsContributor[] = ["bride", "groom", "both"];
 
 function parseInput(form: FormData) {
   const amountStr = String(form.get("amount") ?? "").trim();
@@ -8,11 +11,15 @@ function parseInput(form: FormData) {
   const saved_on = String(form.get("saved_on") ?? "").trim() || new Date().toISOString().slice(0, 10);
   const source = String(form.get("source") ?? "").trim() || null;
   const notes = String(form.get("notes") ?? "").trim() || null;
+  const contributor = (String(form.get("contributor") ?? "both")) as SavingsContributor;
 
   if (!amountStr || Number.isNaN(amount) || amount < 0) {
     return { error: "Please enter a valid amount." };
   }
-  return { amount, saved_on, source, notes };
+  if (!VALID_CONTRIBUTORS.includes(contributor)) {
+    return { error: "Invalid contributor." };
+  }
+  return { amount, saved_on, source, notes, contributor };
 }
 
 export async function createSavingEntry(_prev: unknown, form: FormData) {
