@@ -110,11 +110,11 @@ function personShare(payer: LifePerson, groomPct: number | null, side: "groom" |
   return 0;
 }
 
-/** Pre-built list of YYYY-MM strings spanning ±5 years from today. */
+/** Pre-built list of YYYY-MM strings starting from the current month, spanning 10 years forward. */
 const MONTH_OPTIONS: { value: string; label: string }[] = (() => {
   const opts: { value: string; label: string }[] = [];
   const now = new Date();
-  const start = new Date(now.getFullYear() - 2, now.getMonth(), 1);
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
   for (let i = 0; i < 120; i++) {
     const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
     const value = dateToMonth(d);
@@ -271,30 +271,6 @@ export function LifeBudgetClient({
     };
   }, [income, expenses, projection, settings, startingCash]);
 
-  // ---- Per-person breakdown (monthly, at start_month) ---------------------
-  const perPerson = useMemo(() => {
-    const m = settings.start_month;
-
-    const groomIncome = income
-      .filter((i) => isActiveInMonth(i.start_month, i.end_month, m))
-      .reduce((a, i) => a + Number(i.amount) * (i.person === "groom" ? 1 : i.person === "both" ? 0.5 : 0), 0);
-    const brideIncome = income
-      .filter((i) => isActiveInMonth(i.start_month, i.end_month, m))
-      .reduce((a, i) => a + Number(i.amount) * (i.person === "bride" ? 1 : i.person === "both" ? 0.5 : 0), 0);
-
-    const groomExpenses = expenses
-      .filter((e) => isActiveInMonth(e.start_month, e.end_month, m))
-      .reduce((a, e) => a + Number(e.amount) * personShare(e.payer, e.payer_groom_pct, "groom"), 0);
-    const brideExpenses = expenses
-      .filter((e) => isActiveInMonth(e.start_month, e.end_month, m))
-      .reduce((a, e) => a + Number(e.amount) * personShare(e.payer, e.payer_groom_pct, "bride"), 0);
-
-    return {
-      groom: { income: groomIncome, expenses: groomExpenses, net: groomIncome - groomExpenses },
-      bride: { income: brideIncome, expenses: brideExpenses, net: brideIncome - brideExpenses },
-    };
-  }, [income, expenses, settings]);
-
   // ---- Action handlers ----------------------------------------------------
   const handleDeleteIncome = (item: LifeIncomeRow) => {
     if (!confirm(`Delete "${item.name}"?`)) return;
@@ -417,8 +393,8 @@ export function LifeBudgetClient({
 
       {/* Per-person card */}
       <div className="grid grid-cols-2 gap-5 max-md:grid-cols-1 mb-8">
-        <PersonMonthly name="Groom" accent="sage" stats={perPerson.groom} />
-        <PersonMonthly name="Bride" accent="rose" stats={perPerson.bride} />
+        <PersonMonthly name="Groom" accent="sage" income={income} expenses={expenses} person="groom" />
+        <PersonMonthly name="Bride" accent="rose" income={income} expenses={expenses} person="bride" />
       </div>
 
       {/* Three sections */}
@@ -751,19 +727,49 @@ function Legend({ swatch, label }: { swatch: string; label: string }) {
 }
 
 function PersonMonthly({
-  name, accent, stats,
+  name, accent, income, expenses, person,
 }: {
   name: string;
   accent: "sage" | "rose";
-  stats: { income: number; expenses: number; net: number };
+  income: LifeIncomeRow[];
+  expenses: LifeExpenseRow[];
+  person: "groom" | "bride";
 }) {
+  const todayMonth = dateToMonth(new Date());
+  const [selectedMonth, setSelectedMonth] = useState(todayMonth);
+
+  const stats = useMemo(() => {
+    const m = selectedMonth;
+    const personIncome = income
+      .filter((i) => isActiveInMonth(i.start_month, i.end_month, m))
+      .reduce((a, i) => a + Number(i.amount) * (i.person === person ? 1 : i.person === "both" ? 0.5 : 0), 0);
+    const personExpenses = expenses
+      .filter((e) => isActiveInMonth(e.start_month, e.end_month, m))
+      .reduce((a, e) => a + Number(e.amount) * personShare(e.payer, e.payer_groom_pct, person), 0);
+    return { income: personIncome, expenses: personExpenses, net: personIncome - personExpenses };
+  }, [income, expenses, person, selectedMonth]);
+
   const accentBorder = accent === "sage" ? "border-l-sage" : "border-l-rose";
   const accentText = accent === "sage" ? "text-sage" : "text-rose";
   const noData = stats.income === 0 && stats.expenses === 0;
 
   return (
     <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] p-5 shadow-soft`}>
-      <div className={`text-[11px] uppercase tracking-[0.3em] font-medium mb-3 ${accentText}`}>{name} · monthly</div>
+      <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+        <div className={`text-[11px] uppercase tracking-[0.3em] font-medium ${accentText}`}>{name} · monthly</div>
+        <div className="w-44 shrink-0">
+          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+            <SelectTrigger className="h-7 text-[11px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MONTH_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
       {noData ? (
         <p className="text-[13px] italic text-ink-soft">Tag income or expenses to this person.</p>
       ) : (
