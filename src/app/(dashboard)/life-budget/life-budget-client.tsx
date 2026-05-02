@@ -124,24 +124,32 @@ const MONTH_OPTIONS: { value: string; label: string }[] = (() => {
   return opts;
 })();
 
+// Radix's Select does not allow SelectItem value="" — use a sentinel for "none".
+const NO_MONTH = "__none__";
+
 function MonthSelect({ name, defaultValue, placeholder = "Select month…", required = false }: {
   name: string;
   defaultValue?: string;
   placeholder?: string;
   required?: boolean;
 }) {
-  const [value, setValue] = useState(defaultValue ?? "");
-  useEffect(() => { setValue(defaultValue ?? ""); }, [defaultValue]);
+  // Internal value uses NO_MONTH as the sentinel for "no selection";
+  // the hidden input that the form submits stores "" instead.
+  const [value, setValue] = useState<string>(defaultValue ? defaultValue : NO_MONTH);
+  useEffect(() => { setValue(defaultValue ? defaultValue : NO_MONTH); }, [defaultValue]);
+
+  const submittedValue = value === NO_MONTH ? "" : value;
+
   return (
     <>
-      <input type="hidden" name={name} value={value} />
+      <input type="hidden" name={name} value={submittedValue} />
       <Select value={value} onValueChange={setValue} required={required}>
         <SelectTrigger>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
           {!required && (
-            <SelectItem value="">— none —</SelectItem>
+            <SelectItem value={NO_MONTH}>— none —</SelectItem>
           )}
           {MONTH_OPTIONS.map((o) => (
             <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
