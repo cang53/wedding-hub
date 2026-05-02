@@ -34,6 +34,9 @@ export type ApartmentStatus = "interested" | "visited" | "applied" | "rejected";
 
 export type SavingsContributor = "bride" | "groom" | "both";
 
+export type LifePerson = "bride" | "groom" | "both";
+export type StartingCashMode = "manual" | "from_wedding";
+
 // ====== Row shapes ===============================================================
 
 export interface TodoRow {
@@ -127,6 +130,56 @@ export interface WeddingSavingsRow {
   source: string | null;
   notes: string | null;
   contributor: SavingsContributor;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LifeIncomeRow {
+  id: string;
+  name: string;
+  amount: number;
+  person: LifePerson;
+  start_month: string | null;
+  end_month: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LifeExpenseRow {
+  id: string;
+  name: string;
+  amount: number;
+  category: string | null;
+  payer: LifePerson;
+  payer_groom_pct: number | null;
+  start_month: string | null;
+  end_month: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LifePurchaseRow {
+  id: string;
+  name: string;
+  amount: number;
+  category: string | null;
+  target_month: string;
+  payer: LifePerson;
+  payer_groom_pct: number | null;
+  scheduled: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LifeSettingsRow {
+  id: boolean;
+  start_month: string;
+  horizon_months: number;
+  starting_cash_mode: StartingCashMode;
+  starting_cash_manual: number;
   created_at: string;
   updated_at: string;
 }
@@ -373,6 +426,114 @@ export type Database = {
           source?: string | null;
           notes?: string | null;
           contributor?: SavingsContributor;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      life_income: {
+        Row: LifeIncomeRow;
+        Insert: {
+          id?: string;
+          name: string;
+          amount: number;
+          person?: LifePerson;
+          start_month?: string | null;
+          end_month?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          amount?: number;
+          person?: LifePerson;
+          start_month?: string | null;
+          end_month?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      life_expenses: {
+        Row: LifeExpenseRow;
+        Insert: {
+          id?: string;
+          name: string;
+          amount: number;
+          category?: string | null;
+          payer?: LifePerson;
+          payer_groom_pct?: number | null;
+          start_month?: string | null;
+          end_month?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          amount?: number;
+          category?: string | null;
+          payer?: LifePerson;
+          payer_groom_pct?: number | null;
+          start_month?: string | null;
+          end_month?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      life_purchases: {
+        Row: LifePurchaseRow;
+        Insert: {
+          id?: string;
+          name: string;
+          amount: number;
+          category?: string | null;
+          target_month: string;
+          payer?: LifePerson;
+          payer_groom_pct?: number | null;
+          scheduled?: boolean;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          amount?: number;
+          category?: string | null;
+          target_month?: string;
+          payer?: LifePerson;
+          payer_groom_pct?: number | null;
+          scheduled?: boolean;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      life_settings: {
+        Row: LifeSettingsRow;
+        Insert: {
+          id?: boolean;
+          start_month?: string;
+          horizon_months?: number;
+          starting_cash_mode?: StartingCashMode;
+          starting_cash_manual?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: boolean;
+          start_month?: string;
+          horizon_months?: number;
+          starting_cash_mode?: StartingCashMode;
+          starting_cash_manual?: number;
           created_at?: string;
           updated_at?: string;
         };

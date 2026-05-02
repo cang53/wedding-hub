@@ -14,6 +14,7 @@ const TABS: Tab[] = [
   { href: "/todo",       label: "To-Do",     icon: "✓" },
   { href: "/agenda",     label: "Agenda",    icon: "❦" },
   { href: "/budget",     label: "Budget",    icon: "€" },
+  { href: "/life-budget", label: "Life After", icon: "🏡" },
   { href: "/honeymoon",  label: "Honeymoon", icon: "✈" },
   { href: "/guests",     label: "Guests",    icon: "♥" },
   { href: "/apartments", label: "Home",      icon: "⌂" },
