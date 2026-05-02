@@ -8,6 +8,7 @@ import type {
   LifeSettingsRow,
   LifePerson,
   StartingCashMode,
+  ExpenseType,
 } from "@/types/db";
 import { formatMoney } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -107,6 +108,56 @@ function personShare(payer: LifePerson, groomPct: number | null, side: "groom" |
     return side === "groom" ? g : 1 - g;
   }
   return 0;
+}
+
+/** Pre-built list of YYYY-MM strings spanning ±5 years from today. */
+const MONTH_OPTIONS: { value: string; label: string }[] = (() => {
+  const opts: { value: string; label: string }[] = [];
+  const now = new Date();
+  const start = new Date(now.getFullYear() - 2, now.getMonth(), 1);
+  for (let i = 0; i < 120; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    const value = dateToMonth(d);
+    const label = d.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+    opts.push({ value, label });
+  }
+  return opts;
+})();
+
+function MonthSelect({ name, defaultValue, placeholder = "Select month…", required = false }: {
+  name: string;
+  defaultValue?: string;
+  placeholder?: string;
+  required?: boolean;
+}) {
+  const [value, setValue] = useState(defaultValue ?? "");
+  useEffect(() => { setValue(defaultValue ?? ""); }, [defaultValue]);
+  return (
+    <>
+      <input type="hidden" name={name} value={value} />
+      <Select value={value} onValueChange={setValue} required={required}>
+        <SelectTrigger>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {!required && (
+            <SelectItem value="">— none —</SelectItem>
+          )}
+          {MONTH_OPTIONS.map((o) => (
+            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </>
+  );
+}
+
+/** Client-side amortisation (mirrors server logic). */
+function calcMonthlyPayment(principal: number, months: number, annualRate: number): number {
+  if (principal <= 0 || months <= 0) return 0;
+  if (annualRate <= 0) return principal / months;
+  const r = annualRate / 100 / 12;
+  return (principal * r * Math.pow(1 + r, months)) / (Math.pow(1 + r, months) - 1);
 }
 
 // ============================================================================
@@ -390,7 +441,9 @@ export function LifeBudgetClient({
           items={expenses.map((e) => ({
             id: e.id,
             primary: e.name,
-            secondary: `${e.category ?? "—"} · ${payerLabel(e.payer, e.payer_groom_pct)}`,
+            secondary: e.expense_type === "credit"
+              ? `Credit · ${e.credit_months}mo${e.credit_interest_rate ? ` @ ${e.credit_interest_rate}%` : ""} · ${e.start_month ? monthLabel(e.start_month) : "?"} → ${e.end_month ? monthLabel(e.end_month) : "?"} · ${payerLabel(e.payer, e.payer_groom_pct)}`
+              : `${e.category ?? "—"} · ${payerLabel(e.payer, e.payer_groom_pct)}`,
             value: `−${formatMoney(e.amount)}/mo`,
             valueClass: "text-burgundy",
             onClick: () => setExpenseDialog({ open: true, editing: e }),
@@ -878,12 +931,12 @@ function IncomeDialog({
           </div>
           <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="start_month">Starts (optional)</Label>
-              <Input id="start_month" name="start_month" type="month" defaultValue={editing?.start_month ?? ""} />
+              <Label>Starts (optional)</Label>
+              <MonthSelect name="start_month" defaultValue={editing?.start_month ?? ""} />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="end_month">Ends (optional)</Label>
-              <Input id="end_month" name="end_month" type="month" defaultValue={editing?.end_month ?? ""} />
+              <Label>Ends (optional)</Label>
+              <MonthSelect name="end_month" defaultValue={editing?.end_month ?? ""} />
             </div>
           </div>
           <div className="flex flex-col gap-2">
@@ -916,38 +969,161 @@ function ExpenseDialog({
   >(action, null);
 
   const [payer, setPayer] = useState<LifePerson>(editing?.payer ?? "both");
-  useEffect(() => { setPayer(editing?.payer ?? "both"); }, [editing]);
+  const [expenseType, setExpenseType] = useState<ExpenseType>(editing?.expense_type ?? "fixed");
+  // Credit live-calculation state
+  const [creditTotal, setCreditTotal] = useState(editing?.credit_total ?? 0);
+  const [creditMonths, setCreditMonths] = useState(editing?.credit_months ?? 12);
+  const [creditRate, setCreditRate] = useState(editing?.credit_interest_rate ?? 0);
+
+  useEffect(() => {
+    setPayer(editing?.payer ?? "both");
+    setExpenseType(editing?.expense_type ?? "fixed");
+    setCreditTotal(editing?.credit_total ?? 0);
+    setCreditMonths(editing?.credit_months ?? 12);
+    setCreditRate(editing?.credit_interest_rate ?? 0);
+  }, [editing]);
 
   useEffect(() => {
     if (state?.ok && state?.data) { onSaved(state.data); onOpenChange(false); }
   }, [state, onSaved, onOpenChange]);
+
+  const monthly = calcMonthlyPayment(creditTotal, creditMonths, creditRate);
+  const totalRepaid = monthly * creditMonths;
+  const totalInterest = totalRepaid - creditTotal;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{editing ? <>Edit <em>expense</em></> : <>New <em>recurring expense</em></>}</DialogTitle>
-          <DialogDescription>A monthly bill — rent, utilities, credit, etc.</DialogDescription>
+          <DialogDescription>A monthly bill — rent, credit instalment, subscription.</DialogDescription>
         </DialogHeader>
         <form action={formAction} className="flex flex-col gap-4 mt-2">
+
+          {/* Type toggle */}
+          <div className="flex flex-col gap-2">
+            <Label>Type</Label>
+            <input type="hidden" name="expense_type" value={expenseType} />
+            <div className="flex gap-2">
+              {(["fixed", "credit"] as ExpenseType[]).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setExpenseType(t)}
+                  className={`flex-1 px-3 py-2 rounded-[4px] text-[12px] border transition-colors ${
+                    expenseType === t ? "bg-ink text-cream border-ink" : "bg-paper text-ink border-line hover:bg-cream"
+                  }`}
+                >
+                  {t === "fixed" ? "Fixed bill" : "Credit / instalment"}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="flex flex-col gap-2">
             <Label htmlFor="name">Name</Label>
-            <Input id="name" name="name" defaultValue={editing?.name ?? ""} placeholder="e.g. Rent" required autoFocus />
+            <Input
+              id="name" name="name"
+              defaultValue={editing?.name ?? ""}
+              placeholder={expenseType === "fixed" ? "e.g. Rent" : "e.g. Car loan"}
+              required autoFocus
+            />
           </div>
-          <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="amount">Monthly amount (€)</Label>
-              <Input id="amount" name="amount" type="number" min="0" step="1" defaultValue={editing?.amount ?? ""} required />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label>Category</Label>
-              <SelectField
-                name="category"
-                defaultValue={editing?.category ?? "Rent"}
-                options={EXPENSE_CATEGORIES.map((c) => ({ value: c, label: c }))}
-              />
-            </div>
-          </div>
+
+          {expenseType === "fixed" ? (
+            <>
+              <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="amount">Monthly amount (€)</Label>
+                  <Input id="amount" name="amount" type="number" min="0" step="1" defaultValue={editing?.amount ?? ""} required />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label>Category</Label>
+                  <SelectField
+                    name="category"
+                    defaultValue={editing?.category ?? "Rent"}
+                    options={EXPENSE_CATEGORIES.map((c) => ({ value: c, label: c }))}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
+                <div className="flex flex-col gap-2">
+                  <Label>Starts (optional)</Label>
+                  <MonthSelect name="start_month" defaultValue={editing?.start_month ?? ""} />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label>Ends (optional)</Label>
+                  <MonthSelect name="end_month" defaultValue={editing?.end_month ?? ""} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="credit_total">Total amount (€)</Label>
+                  <Input
+                    id="credit_total" name="credit_total" type="number" min="0" step="100"
+                    value={creditTotal || ""}
+                    onChange={(e) => setCreditTotal(parseFloat(e.target.value) || 0)}
+                    required
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="credit_months">Number of months</Label>
+                  <Input
+                    id="credit_months" name="credit_months" type="number" min="1" max="360" step="1"
+                    value={creditMonths || ""}
+                    onChange={(e) => setCreditMonths(parseInt(e.target.value, 10) || 0)}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="credit_interest_rate">Annual interest rate (%)</Label>
+                  <Input
+                    id="credit_interest_rate" name="credit_interest_rate" type="number" min="0" max="99" step="0.1"
+                    value={creditRate || ""}
+                    onChange={(e) => setCreditRate(parseFloat(e.target.value) || 0)}
+                    placeholder="0 for no interest"
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label>Category</Label>
+                  <SelectField
+                    name="category"
+                    defaultValue={editing?.category ?? "Credit"}
+                    options={EXPENSE_CATEGORIES.map((c) => ({ value: c, label: c }))}
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label>Start month</Label>
+                <MonthSelect name="start_month" defaultValue={editing?.start_month ?? ""} required />
+              </div>
+              {/* Live calculation preview */}
+              {creditTotal > 0 && creditMonths > 0 && (
+                <div className="bg-cream-deep/60 border border-line rounded-[4px] px-4 py-3 text-[12px] space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-ink-soft">Monthly payment</span>
+                    <span className="font-mono font-medium text-ink">{formatMoney(monthly)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-ink-soft">Total repaid</span>
+                    <span className="font-mono text-ink">{formatMoney(totalRepaid)}</span>
+                  </div>
+                  {totalInterest > 0.01 && (
+                    <div className="flex justify-between">
+                      <span className="text-ink-soft">Interest cost</span>
+                      <span className="font-mono text-burgundy">{formatMoney(totalInterest)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
           <div className={`grid gap-3.5 max-md:grid-cols-1 ${payer === "both" ? "grid-cols-2" : "grid-cols-1"}`}>
             <div className="flex flex-col gap-2">
               <Label>Who pays?</Label>
@@ -968,16 +1144,7 @@ function ExpenseDialog({
               </div>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="start_month">Starts (optional)</Label>
-              <Input id="start_month" name="start_month" type="month" defaultValue={editing?.start_month ?? ""} />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="end_month">Ends (optional)</Label>
-              <Input id="end_month" name="end_month" type="month" defaultValue={editing?.end_month ?? ""} />
-            </div>
-          </div>
+
           <div className="flex flex-col gap-2">
             <Label htmlFor="notes">Notes (optional)</Label>
             <Textarea id="notes" name="notes" defaultValue={editing?.notes ?? ""} rows={2} />
@@ -1120,8 +1287,8 @@ function SettingsDialog({
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
           <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="start_month">Start month</Label>
-              <Input id="start_month" name="start_month" type="month" defaultValue={settings.start_month} required />
+              <Label>Start month</Label>
+              <MonthSelect name="start_month" defaultValue={settings.start_month} required />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="horizon_months">Horizon (months)</Label>
