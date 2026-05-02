@@ -1,7 +1,7 @@
 "use server";
 
 import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
-import type { LifePerson, StartingCashMode } from "@/types/db";
+import type { ExpenseType, LifePerson, StartingCashMode } from "@/types/db";
 
 const VALID_PERSONS: LifePerson[] = ["bride", "groom", "both"];
 
@@ -61,20 +61,70 @@ export async function deleteIncome(id: string) {
 
 // ---- Recurring expenses --------------------------------------------------
 
+/** Add `credit_months - 1` months to a YYYY-MM string. */
+function addMonths(yearMonth: string, n: number): string {
+  const [y, m] = yearMonth.split("-").map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Standard amortisation formula. Returns 0 when inputs are invalid. */
+function calcMonthlyPayment(principal: number, months: number, annualRate: number): number {
+  if (principal <= 0 || months <= 0) return 0;
+  if (annualRate <= 0) return principal / months;
+  const r = annualRate / 100 / 12;
+  return (principal * r * Math.pow(1 + r, months)) / (Math.pow(1 + r, months) - 1);
+}
+
 function parseExpense(form: FormData) {
   const name = String(form.get("name") ?? "").trim();
-  const amount = parseFloat(String(form.get("amount") ?? ""));
   const category = String(form.get("category") ?? "").trim() || null;
-  const start_month = trimMonth(form.get("start_month"));
-  const end_month = trimMonth(form.get("end_month"));
   const notes = String(form.get("notes") ?? "").trim() || null;
   const { payer, payer_groom_pct } = parsePayerSplit(form);
+  const expense_type = String(form.get("expense_type") ?? "fixed") as ExpenseType;
 
   if (!name) return { error: "Please enter a name." };
-  if (isNaN(amount) || amount < 0) return { error: "Please enter a valid amount." };
   if (!VALID_PERSONS.includes(payer)) return { error: "Invalid payer." };
 
-  return { name, amount, category, payer, payer_groom_pct, start_month, end_month, notes };
+  if (expense_type === "credit") {
+    const credit_total = parseFloat(String(form.get("credit_total") ?? ""));
+    const credit_months = parseInt(String(form.get("credit_months") ?? ""), 10);
+    const credit_interest_rate = parseFloat(String(form.get("credit_interest_rate") ?? "0")) || 0;
+    const start_month = trimMonth(form.get("start_month"));
+
+    if (isNaN(credit_total) || credit_total <= 0) return { error: "Please enter a valid total amount." };
+    if (isNaN(credit_months) || credit_months <= 0) return { error: "Please enter a valid number of months." };
+    if (!start_month) return { error: "Please select a start month for the credit." };
+
+    const amount = Math.round(calcMonthlyPayment(credit_total, credit_months, credit_interest_rate) * 100) / 100;
+    const end_month = addMonths(start_month, credit_months - 1);
+
+    return {
+      name, category, notes, payer, payer_groom_pct,
+      expense_type,
+      amount,
+      start_month,
+      end_month,
+      credit_total,
+      credit_months,
+      credit_interest_rate,
+    };
+  }
+
+  // Fixed
+  const amount = parseFloat(String(form.get("amount") ?? ""));
+  const start_month = trimMonth(form.get("start_month"));
+  const end_month = trimMonth(form.get("end_month"));
+
+  if (isNaN(amount) || amount < 0) return { error: "Please enter a valid amount." };
+
+  return {
+    name, amount, category, payer, payer_groom_pct,
+    expense_type,
+    start_month, end_month,
+    credit_total: null, credit_months: null, credit_interest_rate: null,
+    notes,
+  };
 }
 
 export async function createExpense(_prev: unknown, form: FormData) {

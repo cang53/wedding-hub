@@ -36,6 +36,7 @@ export type SavingsContributor = "bride" | "groom" | "both";
 
 export type LifePerson = "bride" | "groom" | "both";
 export type StartingCashMode = "manual" | "from_wedding";
+export type ExpenseType = "fixed" | "credit";
 
 // ====== Row shapes ===============================================================
 
@@ -155,6 +156,10 @@ export interface LifeExpenseRow {
   payer_groom_pct: number | null;
   start_month: string | null;
   end_month: string | null;
+  expense_type: ExpenseType;
+  credit_total: number | null;
+  credit_months: number | null;
+  credit_interest_rate: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -468,6 +473,10 @@ export type Database = {
           payer_groom_pct?: number | null;
           start_month?: string | null;
           end_month?: string | null;
+          expense_type?: ExpenseType;
+          credit_total?: number | null;
+          credit_months?: number | null;
+          credit_interest_rate?: number | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -481,6 +490,10 @@ export type Database = {
           payer_groom_pct?: number | null;
           start_month?: string | null;
           end_month?: string | null;
+          expense_type?: ExpenseType;
+          credit_total?: number | null;
+          credit_months?: number | null;
+          credit_interest_rate?: number | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
