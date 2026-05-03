@@ -225,22 +225,21 @@ export function LifeBudgetClient({
     : Number(settings.starting_cash_manual ?? 0);
 
   // Per-person starting cash: personal savings + 50% of the common fund.
-  // Wedding costs are tracked separately in the budget tab and are NOT
-  // deducted here — these savings represent life-after capital, not a
-  // wedding cost offset.
+  // This always uses actual logged savings regardless of starting_cash_mode
+  // (that mode only affects the joint household projection, not individual positions).
   const perPersonStartingCash = useMemo(() => {
     const groomSaved = savings.filter((s) => s.contributor === "groom").reduce((a, s) => a + Number(s.amount), 0);
     const brideSaved = savings.filter((s) => s.contributor === "bride").reduce((a, s) => a + Number(s.amount), 0);
     const commonSaved = savings.filter((s) => s.contributor === "both").reduce((a, s) => a + Number(s.amount), 0);
     const halfCommon = commonSaved * 0.5;
-    const groom = settings.starting_cash_mode === "from_wedding"
-      ? groomSaved + halfCommon
-      : startingCash * 0.5;
-    const bride = settings.starting_cash_mode === "from_wedding"
-      ? brideSaved + halfCommon
-      : startingCash * 0.5;
-    return { groom, bride, groomSaved, brideSaved, commonSaved };
-  }, [savings, settings.starting_cash_mode, startingCash]);
+    return {
+      groom: groomSaved + halfCommon,
+      bride: brideSaved + halfCommon,
+      groomSaved,
+      brideSaved,
+      commonSaved,
+    };
+  }, [savings]);
 
   // ---- Projection ---------------------------------------------------------
   const projection = useMemo(() => {
