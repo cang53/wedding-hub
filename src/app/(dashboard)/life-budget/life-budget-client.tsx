@@ -1073,30 +1073,40 @@ function PersonCashflowChart({ projection, person, startingCash }: { projection:
   if (projection.length === 0) return null;
 
   const color = person === "groom" ? "#7c8a6b" : "#a85c72";
-  const W = 860, H = 210, pT = 18, pB = 36, pL = 60, pR = 16;
+  const W = 860, H = 220, pT = 24, pB = 36, pL = 64, pR = 16;
   const iW = W - pL - pR, iH = H - pT - pB;
 
-  // Include startingCash in scale so the anchor is always in view.
   const cumValues = projection.map((p) => p.cumulative);
-  const rawMin = Math.min(0, startingCash, ...cumValues);
-  const rawMax = Math.max(0, startingCash, ...cumValues);
-  const pad = Math.max((rawMax - rawMin) * 0.1, 100);
+
+  // Base Y range on actual values — startingCash is the natural baseline.
+  // DO NOT force 0 into the range: when savings exist the chart must zoom
+  // to the savings-to-projection range so the anchor is visually prominent.
+  const rawMin = Math.min(startingCash, ...cumValues);
+  const rawMax = Math.max(startingCash, ...cumValues);
+  const span = rawMax - rawMin || 1;
+  const pad = Math.max(span * 0.14, 400);
   const yMin = rawMin - pad, yMax = rawMax + pad, range = yMax - yMin || 1;
 
   const yFor = (v: number) => pT + ((yMax - v) / range) * iH;
-  const zeroY = yFor(0);
-  const zeroFrac = Math.max(0.001, Math.min(0.999, (zeroY - pT) / iH));
   const startY = yFor(startingCash);
 
-  // Add a virtual "start" anchor at the very left edge so the line begins
-  // visually from the savings position before month 1's activity.
+  // Zero line — only drawn when 0 falls within the visible Y range.
+  const zeroY = yFor(0);
+  const zeroInView = zeroY >= pT && zeroY <= pT + iH;
+
+  // Gradient stop fraction for the fill — anchored at startingCash rather
+  // than 0 so the gradient correctly marks the savings baseline.
+  const startFrac = Math.max(0.001, Math.min(0.999, (startY - pT) / iH));
+
   const stepX = iW / Math.max(1, projection.length);
   const xFor = (i: number) => pL + (i + 0.5) * stepX;
   const barW = Math.min(stepX * 0.45, 12);
 
+  // Line starts at the savings anchor on the left edge.
   const linePath = `M ${pL} ${startY} ` + projection.map((p, i) => `L ${xFor(i)} ${yFor(p.cumulative)}`).join(" ");
-  const areaPath = `${linePath} L ${xFor(projection.length - 1)} ${zeroY} L ${pL} ${zeroY} Z`;
-  const maxFlow = Math.max(...projection.map((p) => Math.max(p.totalIn, p.totalOut)), 1);
+  // Area fills down to startingCash baseline (not 0).
+  const areaPath = `${linePath} L ${xFor(projection.length - 1)} ${startY} L ${pL} ${startY} Z`;
+  const maxFlow = Math.max(...projection.map((p) => Math.max(Math.abs(p.net), 1)), 1);
   const labelEvery = Math.max(1, Math.ceil(projection.length / 12));
 
   return (
@@ -1118,10 +1128,10 @@ function PersonCashflowChart({ projection, person, startingCash }: { projection:
               <div className="flex justify-between gap-5"><span className="text-cream/50">Net</span><span className="font-mono" style={{ color: p.net >= 0 ? color : "#c47a7a" }}>{p.net >= 0 ? "+" : ""}{formatMoney(p.net)}</span></div>
               <div className="flex justify-between gap-5 border-t border-cream/15 pt-1">
                 <span className="text-cream/50">Position</span>
-                <span className="font-mono font-semibold" style={{ color: p.cumulative >= 0 ? color : "#c47a7a" }}>{formatMoney(p.cumulative)}</span>
+                <span className="font-mono font-semibold" style={{ color: p.cumulative >= startingCash ? color : "#c47a7a" }}>{formatMoney(p.cumulative)}</span>
               </div>
               <div className="flex justify-between gap-5">
-                <span className="text-cream/40 text-[10px]">vs. start</span>
+                <span className="text-cream/40 text-[10px]">vs. savings</span>
                 <span className="font-mono text-[10px]" style={{ color: delta >= 0 ? color : "#c47a7a" }}>{delta >= 0 ? "+" : ""}{formatMoney(delta)}</span>
               </div>
             </div>
@@ -1138,66 +1148,95 @@ function PersonCashflowChart({ projection, person, startingCash }: { projection:
       >
         <defs>
           <linearGradient id={`pg-${person}`} x1="0" y1={pT} x2="0" y2={pT + iH} gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor={color} stopOpacity="0.5" />
-            <stop offset={zeroFrac * 0.82} stopColor={color} stopOpacity="0.12" />
-            <stop offset={zeroFrac} stopColor="#7a1f2b" stopOpacity="0.12" />
-            <stop offset="1" stopColor="#7a1f2b" stopOpacity="0.5" />
+            <stop offset="0" stopColor={color} stopOpacity="0.55" />
+            <stop offset={startFrac * 0.85} stopColor={color} stopOpacity="0.14" />
+            <stop offset={startFrac} stopColor={color} stopOpacity="0.06" />
+            <stop offset="1" stopColor={color} stopOpacity="0.03" />
+          </linearGradient>
+          {/* Savings-zone fill (below the projection line, down to startingCash) */}
+          <linearGradient id={`sz-${person}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor={color} stopOpacity="0.18" />
+            <stop offset="1" stopColor={color} stopOpacity="0.06" />
           </linearGradient>
         </defs>
-        {/* Zero dashed line */}
-        {zeroY >= pT && zeroY <= pT + iH && (
-          <line x1={pL} x2={W - pR} y1={zeroY} y2={zeroY} stroke="#3d2c2e" strokeWidth={1} strokeDasharray="4 4" opacity={0.35} />
-        )}
-        {/* Starting cash reference line — only if meaningfully different from zero */}
-        {startingCash > 0 && Math.abs(startY - zeroY) > 12 && (
+
+        {/* Absolute-zero dashed line — only when 0 falls within the visible Y range */}
+        {zeroInView && (
           <>
-            <line x1={pL} x2={W - pR} y1={startY} y2={startY} stroke={color} strokeWidth={1} strokeDasharray="2 4" opacity={0.55} />
-            <text x={W - pR - 4} y={startY - 4} textAnchor="end" fontSize={9} fill={color} fontFamily="ui-sans-serif" fontWeight={500} opacity={0.85}>
-              start · {formatMoneyShort(startingCash)}
+            <line x1={pL} x2={W - pR} y1={zeroY} y2={zeroY} stroke="#3d2c2e" strokeWidth={1} strokeDasharray="4 4" opacity={0.3} />
+            <text x={pL - 6} y={zeroY + 3.5} textAnchor="end" fontSize={9} fill="#7a6f60" fontFamily="monospace">0</text>
+          </>
+        )}
+
+        {/* Savings baseline — always shown when savings > 0 */}
+        {startingCash > 0 && (
+          <>
+            <line x1={pL} x2={W - pR} y1={startY} y2={startY} stroke={color} strokeWidth={1.5} strokeDasharray="3 5" opacity={0.75} />
+            {/* Left label */}
+            <text x={pL - 6} y={startY + 3.5} textAnchor="end" fontSize={9} fill={color} fontFamily="monospace" fontWeight={600}>
+              {formatMoneyShort(startingCash)}
+            </text>
+            {/* Right label */}
+            <text x={W - pR - 4} y={startY - 5} textAnchor="end" fontSize={9} fill={color} fontFamily="ui-sans-serif" fontWeight={600} opacity={0.9}>
+              savings start
             </text>
           </>
         )}
-        {/* Y labels: min, zero, max */}
-        {[rawMin, 0, rawMax].filter((v) => {
-          const y = yFor(v);
-          return y >= pT + 6 && y <= pT + iH - 6;
-        }).map((v, i) => (
-          <text key={i} x={pL - 8} y={yFor(v) + 3.5} textAnchor="end" fontSize={9} fill="#7a6f60" fontFamily="monospace">
-            {formatMoneyShort(v)}
-          </text>
-        ))}
+
+        {/* Y axis max label */}
+        {(() => {
+          const y = yFor(rawMax);
+          return y >= pT + 6 && y <= pT + iH - 6
+            ? <text x={pL - 6} y={y + 3.5} textAnchor="end" fontSize={9} fill="#7a6f60" fontFamily="monospace">{formatMoneyShort(rawMax)}</text>
+            : null;
+        })()}
+        {/* Y axis min label (only if different from startingCash) */}
+        {rawMin < startingCash - 200 && (() => {
+          const y = yFor(rawMin);
+          return y >= pT + 6 && y <= pT + iH - 6
+            ? <text x={pL - 6} y={y + 3.5} textAnchor="end" fontSize={9} fill="#7a6f60" fontFamily="monospace">{formatMoneyShort(rawMin)}</text>
+            : null;
+        })()}
+
         {/* Hover column */}
         {hoveredIdx !== null && <rect x={pL + hoveredIdx * stepX} y={pT} width={stepX} height={iH} fill="#3d2c2e" opacity={0.04} />}
-        {/* Net bars */}
+
+        {/* Monthly net bars — drawn relative to startingCash baseline so they
+            represent the monthly surplus/deficit on top of the savings floor */}
         {projection.map((p, i) => {
-          const h = Math.max(1, (Math.abs(p.net) / maxFlow) * iH * 0.32);
-          const y = p.net >= 0 ? zeroY - h : zeroY;
+          const h = Math.max(1, (Math.abs(p.net) / maxFlow) * iH * 0.28);
+          const y = p.net >= 0 ? startY - h : startY;
           return (
             <rect key={p.month} x={xFor(i) - barW / 2} y={y} width={barW} height={h}
-              fill={p.net >= 0 ? color : "#7a1f2b"} opacity={hoveredIdx === i ? 0.9 : 0.5} rx={1.5}
+              fill={p.net >= 0 ? color : "#7a1f2b"} opacity={hoveredIdx === i ? 0.9 : 0.45} rx={1.5}
             />
           );
         })}
-        {/* Area + line */}
+
+        {/* Area fill + cumulative line */}
         <path d={areaPath} fill={`url(#pg-${person})`} />
         <path d={linePath} fill="none" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
-        {/* Starting anchor dot at left edge */}
+
+        {/* Savings anchor dot at left edge */}
         {startingCash > 0 && (
           <>
-            <circle cx={pL} cy={startY} r={5} fill={color} stroke="#faf5e9" strokeWidth={2} />
-            <circle cx={pL} cy={startY} r={9} fill="none" stroke={color} strokeWidth={1} opacity={0.4} />
+            <circle cx={pL} cy={startY} r={6} fill={color} stroke="#faf5e9" strokeWidth={2.5} />
+            <circle cx={pL} cy={startY} r={11} fill="none" stroke={color} strokeWidth={1} opacity={0.35} />
           </>
         )}
-        {/* Dots */}
+
+        {/* Month dots */}
         {projection.map((p, i) => (
           <circle key={p.month} cx={xFor(i)} cy={yFor(p.cumulative)}
             r={hoveredIdx === i ? 4.5 : 2.5}
-            fill={p.cumulative >= 0 ? color : "#7a1f2b"} stroke="#faf5e9" strokeWidth={1}
+            fill={p.cumulative >= startingCash ? color : "#7a1f2b"} stroke="#faf5e9" strokeWidth={1}
           />
         ))}
+
         {/* Crosshair */}
         {hoveredIdx !== null && <line x1={xFor(hoveredIdx)} x2={xFor(hoveredIdx)} y1={pT} y2={pT + iH} stroke="#3d2c2e" strokeWidth={1} strokeDasharray="4 3" opacity={0.2} />}
-        {/* X labels */}
+
+        {/* X axis labels */}
         {projection.map((p, i) => {
           if (i % labelEvery !== 0 && i !== projection.length - 1) return null;
           return (
@@ -1207,9 +1246,9 @@ function PersonCashflowChart({ projection, person, startingCash }: { projection:
             </text>
           );
         })}
-        {/* "Start" label below anchor */}
+        {/* "start" label under the anchor */}
         {startingCash > 0 && (
-          <text x={pL} y={H - 12} textAnchor="middle" fontSize={9.5} fill={color} fontFamily="ui-sans-serif" fontWeight={500}>
+          <text x={pL} y={H - 12} textAnchor="middle" fontSize={9} fill={color} fontFamily="ui-sans-serif" fontWeight={600} opacity={0.8}>
             start
           </text>
         )}
