@@ -2333,7 +2333,7 @@ function ExpandedPurchasesDialog({ open, onOpenChange, purchases, onEdit, onDele
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-[80vw] w-[80vw]">
         <DialogHeader>
           <DialogTitle>One-time <em>purchases</em></DialogTitle>
           <DialogDescription>{purchases.length} total · showing {rows.length}</DialogDescription>
