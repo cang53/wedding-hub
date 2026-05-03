@@ -1068,30 +1068,34 @@ function formatMoneyShort(n: number): string {
 
 type PersonPoint = { month: string; net: number; cumulative: number; totalIn: number; totalOut: number };
 
-function PersonCashflowChart({ projection, person }: { projection: PersonPoint[]; person: "groom" | "bride" }) {
+function PersonCashflowChart({ projection, person, startingCash }: { projection: PersonPoint[]; person: "groom" | "bride"; startingCash: number }) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   if (projection.length === 0) return null;
 
   const color = person === "groom" ? "#7c8a6b" : "#a85c72";
-  const W = 860, H = 190, pT = 18, pB = 36, pL = 60, pR = 16;
+  const W = 860, H = 210, pT = 18, pB = 36, pL = 60, pR = 16;
   const iW = W - pL - pR, iH = H - pT - pB;
 
+  // Include startingCash in scale so the anchor is always in view.
   const cumValues = projection.map((p) => p.cumulative);
-  const rawMin = Math.min(0, ...cumValues);
-  const rawMax = Math.max(0, ...cumValues);
+  const rawMin = Math.min(0, startingCash, ...cumValues);
+  const rawMax = Math.max(0, startingCash, ...cumValues);
   const pad = Math.max((rawMax - rawMin) * 0.1, 100);
   const yMin = rawMin - pad, yMax = rawMax + pad, range = yMax - yMin || 1;
 
   const yFor = (v: number) => pT + ((yMax - v) / range) * iH;
   const zeroY = yFor(0);
   const zeroFrac = Math.max(0.001, Math.min(0.999, (zeroY - pT) / iH));
+  const startY = yFor(startingCash);
 
+  // Add a virtual "start" anchor at the very left edge so the line begins
+  // visually from the savings position before month 1's activity.
   const stepX = iW / Math.max(1, projection.length);
   const xFor = (i: number) => pL + (i + 0.5) * stepX;
   const barW = Math.min(stepX * 0.45, 12);
 
-  const linePath = projection.map((p, i) => `${i === 0 ? "M" : "L"} ${xFor(i)} ${yFor(p.cumulative)}`).join(" ");
-  const areaPath = `${linePath} L ${xFor(projection.length - 1)} ${zeroY} L ${xFor(0)} ${zeroY} Z`;
+  const linePath = `M ${pL} ${startY} ` + projection.map((p, i) => `L ${xFor(i)} ${yFor(p.cumulative)}`).join(" ");
+  const areaPath = `${linePath} L ${xFor(projection.length - 1)} ${zeroY} L ${pL} ${zeroY} Z`;
   const maxFlow = Math.max(...projection.map((p) => Math.max(p.totalIn, p.totalOut)), 1);
   const labelEvery = Math.max(1, Math.ceil(projection.length / 12));
 
@@ -1101,18 +1105,24 @@ function PersonCashflowChart({ projection, person }: { projection: PersonPoint[]
         const p = projection[hoveredIdx];
         const cx = xFor(hoveredIdx);
         const flip = cx - pL > iW * 0.65;
+        const delta = p.cumulative - startingCash;
         return (
           <div
-            className="absolute top-3 pointer-events-none z-10 bg-ink/92 text-cream text-[11px] rounded-[5px] px-3 py-2 shadow-lg min-w-[150px]"
-            style={{ left: Math.max(0, flip ? cx - 166 : cx - pL + 10) }}
+            className="absolute top-3 pointer-events-none z-10 bg-ink/92 text-cream text-[11px] rounded-[5px] px-3 py-2 shadow-lg min-w-[170px]"
+            style={{ left: Math.max(0, flip ? cx - 186 : cx - pL + 10) }}
           >
             <div className="font-serif text-[12px] mb-1.5 border-b border-cream/15 pb-1">{monthLabel(p.month)}</div>
             <div className="space-y-1">
               <div className="flex justify-between gap-5"><span className="text-cream/50">In</span><span className="font-mono" style={{ color }}>{formatMoney(p.totalIn)}</span></div>
               <div className="flex justify-between gap-5"><span className="text-cream/50">Out</span><span className="font-mono text-[#c47a7a]">{formatMoney(p.totalOut)}</span></div>
+              <div className="flex justify-between gap-5"><span className="text-cream/50">Net</span><span className="font-mono" style={{ color: p.net >= 0 ? color : "#c47a7a" }}>{p.net >= 0 ? "+" : ""}{formatMoney(p.net)}</span></div>
               <div className="flex justify-between gap-5 border-t border-cream/15 pt-1">
-                <span className="text-cream/50">Savings</span>
+                <span className="text-cream/50">Position</span>
                 <span className="font-mono font-semibold" style={{ color: p.cumulative >= 0 ? color : "#c47a7a" }}>{formatMoney(p.cumulative)}</span>
+              </div>
+              <div className="flex justify-between gap-5">
+                <span className="text-cream/40 text-[10px]">vs. start</span>
+                <span className="font-mono text-[10px]" style={{ color: delta >= 0 ? color : "#c47a7a" }}>{delta >= 0 ? "+" : ""}{formatMoney(delta)}</span>
               </div>
             </div>
           </div>
@@ -1138,6 +1148,15 @@ function PersonCashflowChart({ projection, person }: { projection: PersonPoint[]
         {zeroY >= pT && zeroY <= pT + iH && (
           <line x1={pL} x2={W - pR} y1={zeroY} y2={zeroY} stroke="#3d2c2e" strokeWidth={1} strokeDasharray="4 4" opacity={0.35} />
         )}
+        {/* Starting cash reference line — only if meaningfully different from zero */}
+        {startingCash > 0 && Math.abs(startY - zeroY) > 12 && (
+          <>
+            <line x1={pL} x2={W - pR} y1={startY} y2={startY} stroke={color} strokeWidth={1} strokeDasharray="2 4" opacity={0.55} />
+            <text x={W - pR - 4} y={startY - 4} textAnchor="end" fontSize={9} fill={color} fontFamily="ui-sans-serif" fontWeight={500} opacity={0.85}>
+              start · {formatMoneyShort(startingCash)}
+            </text>
+          </>
+        )}
         {/* Y labels: min, zero, max */}
         {[rawMin, 0, rawMax].filter((v) => {
           const y = yFor(v);
@@ -1162,6 +1181,13 @@ function PersonCashflowChart({ projection, person }: { projection: PersonPoint[]
         {/* Area + line */}
         <path d={areaPath} fill={`url(#pg-${person})`} />
         <path d={linePath} fill="none" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+        {/* Starting anchor dot at left edge */}
+        {startingCash > 0 && (
+          <>
+            <circle cx={pL} cy={startY} r={5} fill={color} stroke="#faf5e9" strokeWidth={2} />
+            <circle cx={pL} cy={startY} r={9} fill="none" stroke={color} strokeWidth={1} opacity={0.4} />
+          </>
+        )}
         {/* Dots */}
         {projection.map((p, i) => (
           <circle key={p.month} cx={xFor(i)} cy={yFor(p.cumulative)}
@@ -1181,6 +1207,12 @@ function PersonCashflowChart({ projection, person }: { projection: PersonPoint[]
             </text>
           );
         })}
+        {/* "Start" label below anchor */}
+        {startingCash > 0 && (
+          <text x={pL} y={H - 12} textAnchor="middle" fontSize={9.5} fill={color} fontFamily="ui-sans-serif" fontWeight={500}>
+            start
+          </text>
+        )}
       </svg>
     </div>
   );
@@ -1367,45 +1399,102 @@ function PersonView({
         </div>
       </div>
 
-      {/* Savings breakdown */}
+      {/* Wealth journey — savings + chart + journey summary in one card */}
+      {(() => {
+        const personalSaved = savings.filter(s => s.contributor === person).reduce((a, s) => a + Number(s.amount), 0);
+        const halfCommon = savingsPots.commonSaved * 0.5;
+        const last = personProjection[personProjection.length - 1];
+        const endCash = last?.cumulative ?? personStartingCash;
+        const delta = endCash - personStartingCash;
+        const avgNet = personProjection.length > 0
+          ? personProjection.reduce((a, p) => a + p.net, 0) / personProjection.length
+          : 0;
+        const lowest = personProjection.length > 0
+          ? personProjection.reduce((m, p) => p.cumulative < m.cumulative ? p : m, personProjection[0])
+          : null;
+
+        return (
+          <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] shadow-soft mb-6`}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-line">
+              <div className="flex items-center gap-2">
+                <span className="text-[15px]">📈</span>
+                <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">{personName} · wealth journey</span>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => onAdd("saving")}>+ Log savings</Button>
+            </div>
+
+            {/* Journey summary: Start → End + delta */}
+            <div className="grid grid-cols-3 gap-4 max-md:grid-cols-1 px-5 pt-5 pb-4">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.3em] text-ink-soft mb-1.5 font-medium">Starting wealth</div>
+                <div className={`font-serif text-[26px] ${accentText}`}><em>{formatMoney(personStartingCash)}</em></div>
+                <div className="text-[11px] text-ink-soft mt-1.5 leading-snug">
+                  {personalSaved > 0 && <span>{formatMoney(personalSaved)} personal</span>}
+                  {personalSaved > 0 && halfCommon > 0 && <span className="mx-1">·</span>}
+                  {halfCommon > 0 && <span className="text-gold">+{formatMoney(halfCommon)} ½ common</span>}
+                  {personalSaved === 0 && halfCommon === 0 && <span className="italic">No savings yet</span>}
+                </div>
+              </div>
+              <div className="flex items-center justify-center max-md:hidden">
+                <div className={`text-[28px] ${delta >= 0 ? accentText : "text-burgundy"} opacity-50`}>→</div>
+              </div>
+              <div className="md:text-right">
+                <div className="text-[10px] uppercase tracking-[0.3em] text-ink-soft mb-1.5 font-medium">After {settings.horizon_months} months</div>
+                <div className={`font-serif text-[26px] ${endCash >= 0 ? accentText : "text-burgundy"}`}>
+                  <em>{endCash >= 0 ? "" : "−"}{formatMoney(Math.abs(endCash))}</em>
+                </div>
+                <div className={`text-[11px] mt-1.5 ${delta >= 0 ? "text-sage" : "text-burgundy"} font-medium`}>
+                  {delta >= 0 ? "+" : "−"}{formatMoney(Math.abs(delta))} over horizon
+                </div>
+              </div>
+            </div>
+
+            {/* Chart */}
+            <div className="px-5 pb-3">
+              <PersonCashflowChart projection={personProjection} person={person} startingCash={personStartingCash} />
+            </div>
+
+            {/* Insight strip */}
+            <div className="grid grid-cols-3 gap-0 max-md:grid-cols-1 border-t border-line text-[12px]">
+              <div className="px-5 py-3 border-r border-line max-md:border-r-0 max-md:border-b">
+                <div className="text-[10px] uppercase tracking-[0.25em] text-ink-soft mb-1 font-medium">Avg monthly net</div>
+                <div className={`font-mono font-medium ${avgNet >= 0 ? accentText : "text-burgundy"}`}>
+                  {avgNet >= 0 ? "+" : ""}{formatMoney(avgNet)}
+                </div>
+              </div>
+              <div className="px-5 py-3 border-r border-line max-md:border-r-0 max-md:border-b">
+                <div className="text-[10px] uppercase tracking-[0.25em] text-ink-soft mb-1 font-medium">Lowest point</div>
+                <div className={`font-mono font-medium ${lowest && lowest.cumulative >= 0 ? accentText : "text-burgundy"}`}>
+                  {lowest ? formatMoney(lowest.cumulative) : "—"}
+                  {lowest && <span className="text-[10px] text-ink-soft ml-1.5 font-normal">{monthShort(lowest.month)}</span>}
+                </div>
+              </div>
+              <div className="px-5 py-3">
+                <div className="text-[10px] uppercase tracking-[0.25em] text-ink-soft mb-1 font-medium">End vs. start</div>
+                <div className={`font-mono font-medium ${delta >= 0 ? "text-sage" : "text-burgundy"}`}>
+                  {delta >= 0 ? "+" : ""}{((delta / Math.max(1, personStartingCash)) * 100).toFixed(0)}%
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Savings ledger — list of entries that feed the starting wealth */}
       <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] shadow-soft mb-6`}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-line">
           <div className="flex items-center gap-2">
             <span className="text-[15px]">💰</span>
-            <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Savings · starting pot</span>
+            <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Savings ledger</span>
           </div>
           <Button variant="ghost" size="sm" onClick={() => onAdd("saving")}>+ Log savings</Button>
         </div>
-        {/* Summary row */}
-        <div className="grid grid-cols-3 gap-4 max-md:grid-cols-1 px-5 pt-4 pb-4 border-b border-line">
-          <div>
-            <div className="text-[10px] text-ink-soft mb-1">Personal savings</div>
-            <div className={`font-mono font-medium text-[16px] ${accentText}`}>
-              {formatMoney(savings.filter(s => s.contributor === person).reduce((a, s) => a + Number(s.amount), 0))}
-            </div>
-          </div>
-          {savingsPots.commonSaved > 0 && (
-            <div>
-              <div className="text-[10px] text-ink-soft mb-1">½ of common fund</div>
-              <div className="font-mono font-medium text-[16px] text-gold">
-                +{formatMoney(savingsPots.commonSaved * 0.5)}
-              </div>
-            </div>
-          )}
-          <div>
-            <div className="text-[10px] text-ink-soft mb-1">Starting position</div>
-            <div className={`font-mono font-bold text-[16px] ${accentText}`}>
-              {formatMoney(personStartingCash)}
-            </div>
-          </div>
-        </div>
-        {/* All savings entries affecting this person */}
         {(() => {
           const relevant = savings
             .filter(s => s.contributor === person || s.contributor === "both")
             .sort((a, b) => b.saved_on.localeCompare(a.saved_on));
           if (relevant.length === 0) {
-            return <p className="px-5 py-6 text-[13px] italic text-ink-soft">No savings logged yet.</p>;
+            return <p className="px-5 py-6 text-[13px] italic text-ink-soft">No savings logged yet — click <strong>+ Log savings</strong> to start tracking.</p>;
           }
           return (
             <ul className="divide-y divide-line">
@@ -1425,34 +1514,13 @@ function PersonView({
                     </div>
                   </div>
                   <div className={`font-mono font-medium text-[12px] shrink-0 ${s.contributor === "both" ? "text-gold" : accentText}`}>
-                    +{formatMoney(s.contributor === "both" ? Number(s.amount) * 0.5 : s.amount)}
+                    +{formatMoney(s.contributor === "both" ? Number(s.amount) * 0.5 : Number(s.amount))}
                   </div>
                 </li>
               ))}
             </ul>
           );
         })()}
-      </div>
-
-      {/* Personal savings trajectory chart */}
-      <div className="bg-paper border border-line rounded-[4px] p-5 shadow-soft mb-6">
-        <div className="flex items-baseline justify-between mb-1 gap-2">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">{personName} · cashflow projection</div>
-            <p className="text-[12px] text-ink-soft italic mt-0.5">
-              Starting from €{formatMoney(personStartingCash)}, your cumulative position over time.
-            </p>
-          </div>
-          {(() => {
-            const last = personProjection[personProjection.length - 1];
-            return last ? (
-              <div className={`font-serif text-[18px] shrink-0 ${last.cumulative >= 0 ? accentText : "text-burgundy"}`}>
-                <em>{last.cumulative >= 0 ? "+" : ""}{formatMoney(last.cumulative)}</em>
-              </div>
-            ) : null;
-          })()}
-        </div>
-        <PersonCashflowChart projection={personProjection} person={person} />
       </div>
 
       {/* Filtered lists */}
