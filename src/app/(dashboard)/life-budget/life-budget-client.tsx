@@ -224,6 +224,24 @@ export function LifeBudgetClient({
     ? weddingCashOnHand
     : Number(settings.starting_cash_manual ?? 0);
 
+  // Per-person starting cash derived from savings allocation.
+  // Each person keeps their personal pot; the common fund is split 50/50.
+  // Wedding costs (totalPaidOnWedding) are also shared 50/50 across the two pots.
+  const perPersonStartingCash = useMemo(() => {
+    const groomSaved = savings.filter((s) => s.contributor === "groom").reduce((a, s) => a + Number(s.amount), 0);
+    const brideSaved = savings.filter((s) => s.contributor === "bride").reduce((a, s) => a + Number(s.amount), 0);
+    const commonSaved = savings.filter((s) => s.contributor === "both").reduce((a, s) => a + Number(s.amount), 0);
+    const halfCommon = commonSaved * 0.5;
+    const halfPaid = totalPaidOnWedding * 0.5;
+    const groom = settings.starting_cash_mode === "from_wedding"
+      ? Math.max(0, groomSaved + halfCommon - halfPaid)
+      : startingCash * 0.5;
+    const bride = settings.starting_cash_mode === "from_wedding"
+      ? Math.max(0, brideSaved + halfCommon - halfPaid)
+      : startingCash * 0.5;
+    return { groom, bride, groomSaved, brideSaved, commonSaved };
+  }, [savings, totalPaidOnWedding, settings.starting_cash_mode, startingCash]);
+
   // ---- Projection ---------------------------------------------------------
   const projection = useMemo(() => {
     const months = monthsList(settings.start_month, settings.horizon_months);
@@ -441,8 +459,8 @@ export function LifeBudgetClient({
 
       {/* Per-person card */}
       <div className="grid grid-cols-2 gap-5 max-md:grid-cols-1 mb-8">
-        <PersonMonthly name="Groom" accent="sage" income={income} expenses={expenses} purchases={purchases} person="groom" />
-        <PersonMonthly name="Bride" accent="rose" income={income} expenses={expenses} purchases={purchases} person="bride" />
+        <PersonMonthly name="Groom" accent="sage" income={income} expenses={expenses} purchases={purchases} person="groom" startingCash={perPersonStartingCash.groom} />
+        <PersonMonthly name="Bride" accent="rose" income={income} expenses={expenses} purchases={purchases} person="bride" startingCash={perPersonStartingCash.bride} />
       </div>
 
       {/* Three sections */}
@@ -532,6 +550,7 @@ export function LifeBudgetClient({
         </div>
         <SavingsPots
           savings={savings}
+          pots={perPersonStartingCash}
           onEdit={(s) => setSavingsDialog({ open: true, editing: s })}
           onDelete={handleDeleteSaving}
         />
@@ -546,6 +565,8 @@ export function LifeBudgetClient({
           expenses={expenses}
           purchases={purchases}
           settings={settings}
+          personStartingCash={view === "groom" ? perPersonStartingCash.groom : perPersonStartingCash.bride}
+          savingsPots={perPersonStartingCash}
           onEditIncome={(i) => setIncomeDialog({ open: true, editing: i })}
           onEditExpense={(e) => setExpenseDialog({ open: true, editing: e })}
           onEditPurchase={(p) => setPurchaseDialog({ open: true, editing: p })}
@@ -1156,6 +1177,7 @@ function PersonCashflowChart({ projection, person }: { projection: PersonPoint[]
 
 function PersonView({
   person, income, expenses, purchases, settings,
+  personStartingCash, savingsPots,
   onEditIncome, onEditExpense, onEditPurchase, onAdd,
 }: {
   person: "groom" | "bride";
@@ -1163,6 +1185,8 @@ function PersonView({
   expenses: LifeExpenseRow[];
   purchases: LifePurchaseRow[];
   settings: LifeSettingsRow;
+  personStartingCash: number;
+  savingsPots: { groom: number; bride: number; groomSaved: number; brideSaved: number; commonSaved: number };
   onEditIncome: (i: LifeIncomeRow) => void;
   onEditExpense: (e: LifeExpenseRow) => void;
   onEditPurchase: (p: LifePurchaseRow) => void;
@@ -1201,10 +1225,10 @@ function PersonView({
     return { myIncome, commonIncome, myBills, sharedBills, myPurch, sharedPurch, totalIn, totalOut, net: totalIn - totalOut };
   }, [selectedMonth, income, expenses, purchases, person]);
 
-  // Personal projection
+  // Personal projection — starts from this person's allocated savings pot
   const personProjection = useMemo((): PersonPoint[] => {
     const months = monthsList(settings.start_month, settings.horizon_months);
-    let cumulative = 0;
+    let cumulative = personStartingCash;
     return months.map((month) => {
       const myInc = income
         .filter((i) => i.person === person && isActiveInMonth(i.start_month, i.end_month, month))
@@ -1231,8 +1255,29 @@ function PersonView({
 
   const savingsRate = snap.totalIn > 0 ? (snap.net / snap.totalIn) * 100 : 0;
 
+  const personalSaved = person === "groom" ? savingsPots.groomSaved : savingsPots.brideSaved;
+  const halfCommon = savingsPots.commonSaved * 0.5;
+
   return (
     <div className="animate-in fade-in duration-200">
+      {/* Savings origin strip */}
+      {personStartingCash > 0 && (
+        <div className="mb-6 px-5 py-3 bg-cream-deep/60 border border-line rounded-[4px] flex flex-wrap items-center gap-x-6 gap-y-1.5 text-[12px]">
+          <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium shrink-0">Starting position</span>
+          <span className="text-ink-soft">
+            Personal savings <strong className={`font-mono ${accentText}`}>{formatMoney(personalSaved)}</strong>
+          </span>
+          {halfCommon > 0 && (
+            <span className="text-ink-soft">
+              + ½ common fund <strong className="font-mono text-gold">{formatMoney(halfCommon)}</strong>
+            </span>
+          )}
+          <span className="ml-auto font-mono font-medium text-[14px] text-ink">
+            = {formatMoney(personStartingCash)} net
+          </span>
+        </div>
+      )}
+
       {/* Month selector */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">
         <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Snapshot for</span>
@@ -1546,7 +1591,7 @@ function ViewSwitcher({ view, onChange }: { view: LifeView; onChange: (v: LifeVi
 }
 
 function PersonMonthly({
-  name, accent, income, expenses, purchases, person,
+  name, accent, income, expenses, purchases, person, startingCash,
 }: {
   name: string;
   accent: "sage" | "rose";
@@ -1554,6 +1599,7 @@ function PersonMonthly({
   expenses: LifeExpenseRow[];
   purchases: LifePurchaseRow[];
   person: "groom" | "bride";
+  startingCash: number;
 }) {
   const todayMonth = dateToMonth(new Date());
   const [selectedMonth, setSelectedMonth] = useState(todayMonth);
@@ -1598,6 +1644,14 @@ function PersonMonthly({
           </Select>
         </div>
       </div>
+      {/* Starting pot */}
+      {startingCash > 0 && (
+        <div className="flex items-center justify-between mb-3 pb-3 border-b border-line">
+          <span className="text-[10px] uppercase tracking-[0.2em] text-ink-soft">Starting pot</span>
+          <span className={`font-mono text-[13px] font-medium ${accentText}`}>{formatMoney(startingCash)}</span>
+        </div>
+      )}
+
       {noData ? (
         <p className="text-[13px] italic text-ink-soft">Tag income or expenses to this person.</p>
       ) : (
@@ -2492,10 +2546,12 @@ function ExpandedPurchasesDialog({ open, onOpenChange, purchases, onEdit, onDele
 
 function SavingsPots({
   savings,
+  pots: allocatedPots,
   onEdit,
   onDelete,
 }: {
   savings: WeddingSavingsRow[];
+  pots: { groom: number; bride: number; groomSaved: number; brideSaved: number; commonSaved: number };
   onEdit: (s: WeddingSavingsRow) => void;
   onDelete: (s: WeddingSavingsRow) => void;
 }) {
@@ -2561,6 +2617,11 @@ function SavingsPots({
               </div>
             )}
           </div>
+          <div className="pt-3 border-t border-line">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-0.5">Starting position after wedding</div>
+            <div className="font-mono font-medium text-sage text-[15px]">{formatMoney(allocatedPots.groom)}</div>
+            <div className="text-[10px] text-ink-soft mt-0.5">personal + ½ common − ½ costs</div>
+          </div>
         </div>
 
         {/* Bride */}
@@ -2583,6 +2644,11 @@ function SavingsPots({
               </div>
             )}
           </div>
+          <div className="pt-3 border-t border-line">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-0.5">Starting position after wedding</div>
+            <div className="font-mono font-medium text-rose text-[15px]">{formatMoney(allocatedPots.bride)}</div>
+            <div className="text-[10px] text-ink-soft mt-0.5">personal + ½ common − ½ costs</div>
+          </div>
         </div>
 
         {/* Common fund */}
@@ -2602,6 +2668,15 @@ function SavingsPots({
             {pots.transferredFromBride > 0 && <div>From bride: {formatMoney(pots.transferredFromBride)}</div>}
             {pots.transferredFromGroom === 0 && pots.transferredFromBride === 0 && <div>{pots.lastCommon?.source ?? "—"}</div>}
           </div>
+          {pots.commonTotal > 0 && (
+            <div className="pt-3 border-t border-line">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Split 50/50</div>
+              <div className="flex justify-between text-[12px]">
+                <span className="text-sage">→ Groom {formatMoney(pots.commonTotal * 0.5)}</span>
+                <span className="text-rose">Bride {formatMoney(pots.commonTotal * 0.5)} →</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
