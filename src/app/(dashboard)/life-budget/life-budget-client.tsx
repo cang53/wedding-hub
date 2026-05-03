@@ -533,27 +533,39 @@ export function LifeBudgetClient({
         />
       </div>
 
-      {/* Wedding savings section */}
+      {/* Wedding savings section — simplified for joint view */}
       <div className="mt-8">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div>
             <div className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Wedding savings</div>
             <div className="font-serif text-[18px] text-ink mt-0.5">
-              Your pot at the start of life after — <em>{formatMoney(weddingCashOnHand)}</em> cash on hand
+              Combined pot — <em>{formatMoney(weddingCashOnHand)}</em> cash on hand
             </div>
           </div>
           <div className="flex gap-2 flex-wrap">
             <Button variant="ghost" size="sm" onClick={() => setTransferDialogOpen(true)}>⇄ Transfer to Common</Button>
-            <Button variant="ghost" size="sm" onClick={() => setExpandedSavingsOpen(true)}>Show all ↗</Button>
+            <Button variant="ghost" size="sm" onClick={() => setExpandedSavingsOpen(true)}>View all ↗</Button>
             <Button size="sm" onClick={() => setSavingsDialog({ open: true, editing: null })}>+ Log savings</Button>
           </div>
         </div>
-        <SavingsPots
-          savings={savings}
-          pots={perPersonStartingCash}
-          onEdit={(s) => setSavingsDialog({ open: true, editing: s })}
-          onDelete={handleDeleteSaving}
-        />
+        {/* Compact three-pot summary */}
+        <div className="grid grid-cols-3 gap-4 max-md:grid-cols-1">
+          <div className="bg-paper border border-line border-l-[3px] border-l-sage rounded-[4px] p-4 shadow-soft">
+            <div className="text-[10px] uppercase tracking-[0.3em] text-sage font-medium mb-1">Groom</div>
+            <div className="font-serif text-[24px] text-ink"><em>{formatMoney(perPersonStartingCash.groomSaved)}</em></div>
+            <div className="text-[11px] text-ink-soft mt-1">→ starts with {formatMoney(perPersonStartingCash.groom)}</div>
+          </div>
+          <div className="bg-paper border border-line border-l-[3px] border-l-rose rounded-[4px] p-4 shadow-soft">
+            <div className="text-[10px] uppercase tracking-[0.3em] text-rose font-medium mb-1">Bride</div>
+            <div className="font-serif text-[24px] text-ink"><em>{formatMoney(perPersonStartingCash.brideSaved)}</em></div>
+            <div className="text-[11px] text-ink-soft mt-1">→ starts with {formatMoney(perPersonStartingCash.bride)}</div>
+          </div>
+          <div className="bg-paper border border-line border-l-[3px] border-l-gold rounded-[4px] p-4 shadow-soft">
+            <div className="text-[10px] uppercase tracking-[0.3em] text-gold font-medium mb-1">Common</div>
+            <div className="font-serif text-[24px] text-ink"><em>{formatMoney(perPersonStartingCash.commonSaved)}</em></div>
+            <div className="text-[11px] text-ink-soft mt-1">÷2 to each person</div>
+          </div>
+        </div>
       </div>
       </>
       )}
@@ -564,16 +576,19 @@ export function LifeBudgetClient({
           income={income}
           expenses={expenses}
           purchases={purchases}
+          savings={savings}
           settings={settings}
           personStartingCash={view === "groom" ? perPersonStartingCash.groom : perPersonStartingCash.bride}
           savingsPots={perPersonStartingCash}
           onEditIncome={(i) => setIncomeDialog({ open: true, editing: i })}
           onEditExpense={(e) => setExpenseDialog({ open: true, editing: e })}
           onEditPurchase={(p) => setPurchaseDialog({ open: true, editing: p })}
+          onEditSaving={(s) => setSavingsDialog({ open: true, editing: s })}
           onAdd={(type) => {
             if (type === "income") setIncomeDialog({ open: true, editing: null });
             else if (type === "expense") setExpenseDialog({ open: true, editing: null });
-            else setPurchaseDialog({ open: true, editing: null });
+            else if (type === "purchase") setPurchaseDialog({ open: true, editing: null });
+            else if (type === "saving") setSavingsDialog({ open: true, editing: null });
           }}
         />
       )}
@@ -1176,21 +1191,23 @@ function PersonCashflowChart({ projection, person }: { projection: PersonPoint[]
 // ============================================================================
 
 function PersonView({
-  person, income, expenses, purchases, settings,
+  person, income, expenses, purchases, savings, settings,
   personStartingCash, savingsPots,
-  onEditIncome, onEditExpense, onEditPurchase, onAdd,
+  onEditIncome, onEditExpense, onEditPurchase, onEditSaving, onAdd,
 }: {
   person: "groom" | "bride";
   income: LifeIncomeRow[];
   expenses: LifeExpenseRow[];
   purchases: LifePurchaseRow[];
+  savings: WeddingSavingsRow[];
   settings: LifeSettingsRow;
   personStartingCash: number;
   savingsPots: { groom: number; bride: number; groomSaved: number; brideSaved: number; commonSaved: number };
   onEditIncome: (i: LifeIncomeRow) => void;
   onEditExpense: (e: LifeExpenseRow) => void;
   onEditPurchase: (p: LifePurchaseRow) => void;
-  onAdd: (type: "income" | "expense" | "purchase") => void;
+  onEditSaving: (s: WeddingSavingsRow) => void;
+  onAdd: (type: "income" | "expense" | "purchase" | "saving") => void;
 }) {
   const todayMonth = dateToMonth(new Date());
   const [selectedMonth, setSelectedMonth] = useState(todayMonth);
@@ -1255,29 +1272,8 @@ function PersonView({
 
   const savingsRate = snap.totalIn > 0 ? (snap.net / snap.totalIn) * 100 : 0;
 
-  const personalSaved = person === "groom" ? savingsPots.groomSaved : savingsPots.brideSaved;
-  const halfCommon = savingsPots.commonSaved * 0.5;
-
   return (
     <div className="animate-in fade-in duration-200">
-      {/* Savings origin strip */}
-      {personStartingCash > 0 && (
-        <div className="mb-6 px-5 py-3 bg-cream-deep/60 border border-line rounded-[4px] flex flex-wrap items-center gap-x-6 gap-y-1.5 text-[12px]">
-          <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium shrink-0">Starting position</span>
-          <span className="text-ink-soft">
-            Personal savings <strong className={`font-mono ${accentText}`}>{formatMoney(personalSaved)}</strong>
-          </span>
-          {halfCommon > 0 && (
-            <span className="text-ink-soft">
-              + ½ common fund <strong className="font-mono text-gold">{formatMoney(halfCommon)}</strong>
-            </span>
-          )}
-          <span className="ml-auto font-mono font-medium text-[14px] text-ink">
-            = {formatMoney(personStartingCash)} net
-          </span>
-        </div>
-      )}
-
       {/* Month selector */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">
         <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Snapshot for</span>
@@ -1371,13 +1367,64 @@ function PersonView({
         </div>
       </div>
 
-      {/* Personal savings chart */}
+      {/* Savings breakdown */}
+      <div className="bg-paper border border-line rounded-[4px] p-5 shadow-soft mb-6">
+        <div className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium mb-4">{personName} · savings breakdown</div>
+        <div className="grid grid-cols-3 gap-4 max-md:grid-cols-1 mb-4">
+          {/* Logged savings */}
+          <div>
+            <div className="text-[10px] text-ink-soft mb-1">Logged savings</div>
+            <div className={`font-mono font-medium text-[16px] ${accentText}`}>
+              {formatMoney(
+                savings
+                  .filter(s => s.contributor === person)
+                  .reduce((a, s) => a + Number(s.amount), 0)
+              )}
+            </div>
+          </div>
+          {/* Common share */}
+          {savingsPots.commonSaved > 0 && (
+            <div>
+              <div className="text-[10px] text-ink-soft mb-1">½ of common fund</div>
+              <div className="font-mono font-medium text-[16px] text-gold">
+                {formatMoney(savingsPots.commonSaved * 0.5)}
+              </div>
+            </div>
+          )}
+          {/* Total starting */}
+          <div>
+            <div className="text-[10px] text-ink-soft mb-1">Starting position</div>
+            <div className={`font-mono font-medium text-[16px] ${accentText}`}>
+              {formatMoney(personStartingCash)}
+            </div>
+          </div>
+        </div>
+        {/* Personal savings entries */}
+        {savings.filter(s => s.contributor === person).length > 0 && (
+          <div className="space-y-2">
+            {savings
+              .filter(s => s.contributor === person)
+              .sort((a, b) => b.saved_on.localeCompare(a.saved_on))
+              .map((s) => (
+                <div key={s.id} className="flex items-center justify-between text-[12px] py-2 px-3 rounded hover:bg-cream/30 cursor-pointer" onClick={() => onEditSaving(s)}>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-ink">{s.source ?? "Savings"}</div>
+                    <div className="text-[10px] text-ink-soft">{formatDate(s.saved_on)}</div>
+                  </div>
+                  <div className={`font-mono font-medium ${accentText} shrink-0`}>+{formatMoney(s.amount)}</div>
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+
+      {/* Personal savings trajectory chart */}
       <div className="bg-paper border border-line rounded-[4px] p-5 shadow-soft mb-6">
         <div className="flex items-baseline justify-between mb-1 gap-2">
           <div>
-            <div className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">{personName} · personal savings trajectory</div>
+            <div className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">{personName} · cashflow projection</div>
             <p className="text-[12px] text-ink-soft italic mt-0.5">
-              Cumulative personal balance over the projection (starting from €0).
+              Starting from €{formatMoney(personStartingCash)}, your cumulative position over time.
             </p>
           </div>
           {(() => {
