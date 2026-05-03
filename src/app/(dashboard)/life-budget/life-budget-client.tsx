@@ -1268,7 +1268,7 @@ function PersonView({
       cumulative += net;
       return { month, totalIn, totalOut, net, cumulative };
     });
-  }, [income, expenses, purchases, settings, person]);
+  }, [income, expenses, purchases, settings, person, personStartingCash]);
 
   const savingsRate = snap.totalIn > 0 ? (snap.net / snap.totalIn) * 100 : 0;
 
@@ -1368,54 +1368,70 @@ function PersonView({
       </div>
 
       {/* Savings breakdown */}
-      <div className="bg-paper border border-line rounded-[4px] p-5 shadow-soft mb-6">
-        <div className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium mb-4">{personName} · savings breakdown</div>
-        <div className="grid grid-cols-3 gap-4 max-md:grid-cols-1 mb-4">
-          {/* Logged savings */}
+      <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] shadow-soft mb-6`}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-line">
+          <div className="flex items-center gap-2">
+            <span className="text-[15px]">💰</span>
+            <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Savings · starting pot</span>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => onAdd("saving")}>+ Log savings</Button>
+        </div>
+        {/* Summary row */}
+        <div className="grid grid-cols-3 gap-4 max-md:grid-cols-1 px-5 pt-4 pb-4 border-b border-line">
           <div>
-            <div className="text-[10px] text-ink-soft mb-1">Logged savings</div>
+            <div className="text-[10px] text-ink-soft mb-1">Personal savings</div>
             <div className={`font-mono font-medium text-[16px] ${accentText}`}>
-              {formatMoney(
-                savings
-                  .filter(s => s.contributor === person)
-                  .reduce((a, s) => a + Number(s.amount), 0)
-              )}
+              {formatMoney(savings.filter(s => s.contributor === person).reduce((a, s) => a + Number(s.amount), 0))}
             </div>
           </div>
-          {/* Common share */}
           {savingsPots.commonSaved > 0 && (
             <div>
               <div className="text-[10px] text-ink-soft mb-1">½ of common fund</div>
               <div className="font-mono font-medium text-[16px] text-gold">
-                {formatMoney(savingsPots.commonSaved * 0.5)}
+                +{formatMoney(savingsPots.commonSaved * 0.5)}
               </div>
             </div>
           )}
-          {/* Total starting */}
           <div>
             <div className="text-[10px] text-ink-soft mb-1">Starting position</div>
-            <div className={`font-mono font-medium text-[16px] ${accentText}`}>
+            <div className={`font-mono font-bold text-[16px] ${accentText}`}>
               {formatMoney(personStartingCash)}
             </div>
           </div>
         </div>
-        {/* Personal savings entries */}
-        {savings.filter(s => s.contributor === person).length > 0 && (
-          <div className="space-y-2">
-            {savings
-              .filter(s => s.contributor === person)
-              .sort((a, b) => b.saved_on.localeCompare(a.saved_on))
-              .map((s) => (
-                <div key={s.id} className="flex items-center justify-between text-[12px] py-2 px-3 rounded hover:bg-cream/30 cursor-pointer" onClick={() => onEditSaving(s)}>
+        {/* All savings entries affecting this person */}
+        {(() => {
+          const relevant = savings
+            .filter(s => s.contributor === person || s.contributor === "both")
+            .sort((a, b) => b.saved_on.localeCompare(a.saved_on));
+          if (relevant.length === 0) {
+            return <p className="px-5 py-6 text-[13px] italic text-ink-soft">No savings logged yet.</p>;
+          }
+          return (
+            <ul className="divide-y divide-line">
+              {relevant.map((s) => (
+                <li key={s.id}
+                  className="flex items-center gap-3 px-5 py-3 hover:bg-cream/30 cursor-pointer"
+                  onClick={() => onEditSaving(s)}
+                >
                   <div className="flex-1 min-w-0">
-                    <div className="text-ink">{s.source ?? "Savings"}</div>
-                    <div className="text-[10px] text-ink-soft">{formatDate(s.saved_on)}</div>
+                    <div className="font-medium text-ink truncate text-[13px]">{s.source ?? "Savings"}</div>
+                    <div className="text-[11px] text-ink-soft truncate">
+                      {s.contributor === "both"
+                        ? <span className="text-gold">⇄ Common fund · your 50%</span>
+                        : <span className={accentText}>Personal</span>
+                      }
+                      {" · "}{formatDate(s.saved_on)}
+                    </div>
                   </div>
-                  <div className={`font-mono font-medium ${accentText} shrink-0`}>+{formatMoney(s.amount)}</div>
-                </div>
+                  <div className={`font-mono font-medium text-[12px] shrink-0 ${s.contributor === "both" ? "text-gold" : accentText}`}>
+                    +{formatMoney(s.contributor === "both" ? Number(s.amount) * 0.5 : s.amount)}
+                  </div>
+                </li>
               ))}
-          </div>
-        )}
+            </ul>
+          );
+        })()}
       </div>
 
       {/* Personal savings trajectory chart */}
