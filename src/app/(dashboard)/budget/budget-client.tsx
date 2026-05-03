@@ -104,6 +104,8 @@ export function BudgetClient({ initialBudget, initialSavings }: Props) {
 
   const [budgetDialogOpen, setBudgetDialogOpen] = useState(false);
   const [savingsDialogOpen, setSavingsDialogOpen] = useState(false);
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [expandedSavingsOpen, setExpandedSavingsOpen] = useState(false);
   const [editingBudget, setEditingBudget] = useState<BudgetRow | null>(null);
   const [editingSaving, setEditingSaving] = useState<WeddingSavingsRow | null>(null);
 
@@ -341,6 +343,8 @@ export function BudgetClient({ initialBudget, initialSavings }: Props) {
           recentSavings={savings.slice(0, 5)}
           recentBudget={[...budget].sort((a, b) => (b.created_at > a.created_at ? 1 : -1)).slice(0, 5)}
           perPerson={perPerson}
+          onViewAllSavings={() => setExpandedSavingsOpen(true)}
+          onEditSaving={(s) => { setEditingSaving(s); setSavingsDialogOpen(true); }}
         />
       )}
 
@@ -351,6 +355,7 @@ export function BudgetClient({ initialBudget, initialSavings }: Props) {
           onAdd={() => { setEditingSaving(null); setSavingsDialogOpen(true); }}
           onEdit={(s) => { setEditingSaving(s); setSavingsDialogOpen(true); }}
           onDelete={handleDeleteSaving}
+          onTransfer={() => setTransferDialogOpen(true)}
         />
       )}
 
@@ -392,6 +397,25 @@ export function BudgetClient({ initialBudget, initialSavings }: Props) {
               return exists ? prev.map((i) => (i.id === row.id ? row : i)) : [row, ...prev];
             });
           }}
+        />
+      )}
+
+      {transferDialogOpen && (
+        <TransferDialog
+          open={transferDialogOpen}
+          onOpenChange={setTransferDialogOpen}
+          onSaved={(row) => setSavings((prev) => [row, ...prev])}
+        />
+      )}
+
+      {expandedSavingsOpen && (
+        <ExpandedSavingsDialog
+          open={expandedSavingsOpen}
+          onOpenChange={setExpandedSavingsOpen}
+          savings={savings}
+          onEdit={(s) => { setEditingSaving(s); setSavingsDialogOpen(true); }}
+          onDelete={handleDeleteSaving}
+          onAdd={() => { setEditingSaving(null); setSavingsDialogOpen(true); }}
         />
       )}
     </section>
@@ -476,6 +500,8 @@ function OverviewView({
   recentSavings,
   recentBudget,
   perPerson,
+  onViewAllSavings,
+  onEditSaving,
 }: {
   totals: ReturnType<typeof computeTotalsType>;
   byCategory: { category: string; estimated: number; paid: number }[];
@@ -483,6 +509,8 @@ function OverviewView({
   recentSavings: WeddingSavingsRow[];
   recentBudget: BudgetRow[];
   perPerson: { groom: PersonStats; bride: PersonStats };
+  onViewAllSavings: () => void;
+  onEditSaving: (s: WeddingSavingsRow) => void;
 }) {
   const [viewMode, setViewMode] = useState<"combined" | "per-person">("combined");
   const onTrack = totals.targetPerMonth <= totals.avgMonthly && totals.estimated > 0;
@@ -664,12 +692,15 @@ function OverviewView({
               title="Recent savings"
               emoji="🪴"
               empty="No savings logged yet."
+              onViewAll={onViewAllSavings}
               items={recentSavings.map((s) => ({
                 key: s.id,
                 title: s.source ?? "Saved",
                 meta: formatDate(s.saved_on),
                 value: `+${formatMoney(s.amount)}`,
                 positive: true,
+                contributor: s.contributor,
+                onClick: () => onEditSaving(s),
               }))}
             />
             <ActivityCard
@@ -711,13 +742,38 @@ function SavingsView({
   onAdd,
   onEdit,
   onDelete,
+  onTransfer,
 }: {
   savings: WeddingSavingsRow[];
   totals: ReturnType<typeof computeTotalsType>;
   onAdd: () => void;
   onEdit: (s: WeddingSavingsRow) => void;
   onDelete: (s: WeddingSavingsRow) => void;
+  onTransfer: () => void;
 }) {
+  const pots = useMemo(() => {
+    const groomEntries = savings.filter((s) => s.contributor === "groom");
+    const brideEntries = savings.filter((s) => s.contributor === "bride");
+    const commonEntries = savings.filter((s) => s.contributor === "both");
+
+    const groomTotal = groomEntries.reduce((a, s) => a + s.amount, 0);
+    const brideTotal = brideEntries.reduce((a, s) => a + s.amount, 0);
+    const commonTotal = commonEntries.reduce((a, s) => a + s.amount, 0);
+
+    const transferredFromGroom = commonEntries
+      .filter((s) => s.source?.startsWith("Transfer from Groom"))
+      .reduce((a, s) => a + s.amount, 0);
+    const transferredFromBride = commonEntries
+      .filter((s) => s.source?.startsWith("Transfer from Bride"))
+      .reduce((a, s) => a + s.amount, 0);
+
+    const lastGroom = groomEntries.sort((a, b) => b.saved_on.localeCompare(a.saved_on))[0];
+    const lastBride = brideEntries.sort((a, b) => b.saved_on.localeCompare(a.saved_on))[0];
+    const lastCommon = commonEntries.sort((a, b) => b.saved_on.localeCompare(a.saved_on))[0];
+
+    return { groomTotal, brideTotal, commonTotal, transferredFromGroom, transferredFromBride, lastGroom, lastBride, lastCommon };
+  }, [savings]);
+
   const grouped = useMemo(() => {
     const sorted = [...savings].sort((a, b) => b.saved_on.localeCompare(a.saved_on));
     const map = new Map<string, WeddingSavingsRow[]>();
@@ -735,8 +791,10 @@ function SavingsView({
     }));
   }, [savings]);
 
+  const grandTotal = pots.groomTotal + pots.brideTotal + pots.commonTotal;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* KPIs */}
       <div className="grid grid-cols-4 gap-4 max-md:grid-cols-2 max-sm:grid-cols-1">
         <KPI label="Total saved" value={formatMoney(totals.saved)} accent="sage" meta={`${savings.length} entries`} />
@@ -748,6 +806,99 @@ function SavingsView({
           accent="burgundy"
           meta={`to reach goal in ${totals.monthsToWedding}mo`}
         />
+      </div>
+
+      {/* Three savings pots */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Savings pots</div>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={onTransfer} className="text-[12px]">
+              ⇄ Transfer to Common
+            </Button>
+            <Button size="sm" onClick={onAdd} className="text-[12px]">
+              + Log savings
+            </Button>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-5 max-md:grid-cols-1">
+          {/* Groom's pot */}
+          <div className="bg-paper border border-line border-l-[3px] border-l-sage rounded-[4px] p-6 shadow-soft space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] uppercase tracking-[0.3em] font-medium text-sage">Groom</div>
+              <div className="text-[10px] text-ink-soft">
+                {pots.lastGroom ? formatDate(pots.lastGroom.saved_on) : "—"}
+              </div>
+            </div>
+            <div className="font-serif text-[32px] leading-none text-ink">
+              <em>{formatMoney(pots.groomTotal)}</em>
+            </div>
+            {grandTotal > 0 && (
+              <div className="h-1.5 bg-cream-deep rounded-full overflow-hidden">
+                <div className="h-full bg-sage rounded-full" style={{ width: `${Math.min(100, (pots.groomTotal / grandTotal) * 100)}%` }} />
+              </div>
+            )}
+            <div className="space-y-1 text-[12px] text-ink-soft">
+              <div>{pots.lastGroom?.source ?? "—"}</div>
+              {pots.transferredFromGroom > 0 && (
+                <div className="flex items-center gap-1 text-gold">
+                  <span>⇄</span>
+                  <span>{formatMoney(pots.transferredFromGroom)} transferred to common</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Bride's pot */}
+          <div className="bg-paper border border-line border-l-[3px] border-l-rose rounded-[4px] p-6 shadow-soft space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] uppercase tracking-[0.3em] font-medium text-rose">Bride</div>
+              <div className="text-[10px] text-ink-soft">
+                {pots.lastBride ? formatDate(pots.lastBride.saved_on) : "—"}
+              </div>
+            </div>
+            <div className="font-serif text-[32px] leading-none text-ink">
+              <em>{formatMoney(pots.brideTotal)}</em>
+            </div>
+            {grandTotal > 0 && (
+              <div className="h-1.5 bg-cream-deep rounded-full overflow-hidden">
+                <div className="h-full bg-rose rounded-full" style={{ width: `${Math.min(100, (pots.brideTotal / grandTotal) * 100)}%` }} />
+              </div>
+            )}
+            <div className="space-y-1 text-[12px] text-ink-soft">
+              <div>{pots.lastBride?.source ?? "—"}</div>
+              {pots.transferredFromBride > 0 && (
+                <div className="flex items-center gap-1 text-gold">
+                  <span>⇄</span>
+                  <span>{formatMoney(pots.transferredFromBride)} transferred to common</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Common pot */}
+          <div className="bg-paper border border-line border-l-[3px] border-l-gold rounded-[4px] p-6 shadow-soft space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] uppercase tracking-[0.3em] font-medium text-gold">Common fund</div>
+              <div className="text-[10px] text-ink-soft">
+                {pots.lastCommon ? formatDate(pots.lastCommon.saved_on) : "—"}
+              </div>
+            </div>
+            <div className="font-serif text-[32px] leading-none text-ink">
+              <em>{formatMoney(pots.commonTotal)}</em>
+            </div>
+            {grandTotal > 0 && (
+              <div className="h-1.5 bg-cream-deep rounded-full overflow-hidden">
+                <div className="h-full bg-gold rounded-full" style={{ width: `${Math.min(100, (pots.commonTotal / grandTotal) * 100)}%` }} />
+              </div>
+            )}
+            <div className="space-y-1 text-[12px] text-ink-soft">
+              {pots.transferredFromGroom > 0 && <div>From groom: {formatMoney(pots.transferredFromGroom)}</div>}
+              {pots.transferredFromBride > 0 && <div>From bride: {formatMoney(pots.transferredFromBride)}</div>}
+              {pots.transferredFromGroom === 0 && pots.transferredFromBride === 0 && <div>{pots.lastCommon?.source ?? "—"}</div>}
+            </div>
+          </div>
+        </div>
       </div>
 
       {savings.length === 0 ? (
@@ -762,7 +913,8 @@ function SavingsView({
           <Button onClick={onAdd}>+ Log your first savings</Button>
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-4">
+          <div className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">History</div>
           {grouped.map((group) => (
             <div key={group.key} className="bg-paper border border-line rounded-[4px] shadow-soft overflow-hidden">
               <div className="flex items-baseline justify-between px-6 py-4 border-b border-line bg-cream/40">
@@ -783,7 +935,7 @@ function SavingsView({
                     className="group flex items-center gap-4 px-6 py-4 hover:bg-cream/30 transition-colors cursor-pointer"
                     onClick={() => onEdit(s)}
                   >
-                    <div className="text-[20px]">💶</div>
+                    <div className="text-[20px]">{s.contributor === "groom" ? "👨" : s.contributor === "bride" ? "👰" : "💑"}</div>
                     <div className="flex-1 min-w-0">
                       <div className="font-medium text-ink truncate">
                         {s.source ?? "Savings"}
@@ -798,7 +950,7 @@ function SavingsView({
                       s.contributor === "bride" ? "border-rose/50 text-rose bg-rose/10" :
                       "border-gold/50 text-gold bg-gold/10"
                     }`}>
-                      {s.contributor === "both" ? "Joint" : s.contributor}
+                      {s.contributor === "both" ? "Common" : s.contributor}
                     </span>
                     <div className="font-mono text-sage font-medium">+{formatMoney(s.amount)}</div>
                     <button
@@ -1139,35 +1291,61 @@ function ActivityCard({
   emoji,
   empty,
   items,
+  onViewAll,
 }: {
   title: string;
   emoji: string;
   empty: string;
-  items: { key: string; title: string; meta: string; value: string; positive: boolean }[];
+  items: { key: string; title: string; meta: string; value: string; positive: boolean; contributor?: string; onClick?: () => void }[];
+  onViewAll?: () => void;
 }) {
   return (
-    <div className="bg-paper border border-line rounded-[4px] p-6 shadow-soft">
-      <div className="flex items-center gap-2 mb-4">
+    <div className="bg-paper border border-line rounded-[4px] shadow-soft flex flex-col">
+      <div className="flex items-center gap-2 px-6 pt-6 pb-4">
         <span className="text-[18px]">{emoji}</span>
-        <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">{title}</span>
+        <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium flex-1">{title}</span>
+        {onViewAll && (
+          <button
+            type="button"
+            onClick={onViewAll}
+            className="text-[11px] text-ink-soft hover:text-ink transition-colors px-2 py-0.5 rounded hover:bg-cream-deep"
+          >
+            Show all ↗
+          </button>
+        )}
       </div>
-      {items.length === 0 ? (
-        <p className="text-[13px] italic text-ink-soft">{empty}</p>
-      ) : (
-        <ul className="divide-y divide-line">
-          {items.map((it) => (
-            <li key={it.key} className="flex items-center gap-3 py-2.5">
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-ink truncate">{it.title}</div>
-                <div className="text-[11px] text-ink-soft truncate">{it.meta}</div>
-              </div>
-              <div className={`font-mono text-[13px] ${it.positive ? "text-sage" : "text-ink"}`}>
-                {it.value}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="px-6 pb-6 flex-1">
+        {items.length === 0 ? (
+          <p className="text-[13px] italic text-ink-soft">{empty}</p>
+        ) : (
+          <ul className="divide-y divide-line">
+            {items.map((it) => (
+              <li
+                key={it.key}
+                className={`flex items-center gap-3 py-2.5 ${it.onClick ? "cursor-pointer hover:bg-cream/30 -mx-2 px-2 rounded transition-colors" : ""}`}
+                onClick={it.onClick}
+              >
+                {it.contributor && (
+                  <span className={`text-[9px] uppercase tracking-[0.1em] px-1.5 py-0.5 rounded-full border shrink-0 ${
+                    it.contributor === "groom" ? "border-sage/50 text-sage bg-sage/10" :
+                    it.contributor === "bride" ? "border-rose/50 text-rose bg-rose/10" :
+                    "border-gold/50 text-gold bg-gold/10"
+                  }`}>
+                    {it.contributor === "both" ? "Joint" : it.contributor}
+                  </span>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] text-ink truncate">{it.title}</div>
+                  <div className="text-[11px] text-ink-soft truncate">{it.meta}</div>
+                </div>
+                <div className={`font-mono text-[13px] ${it.positive ? "text-sage" : "text-ink"}`}>
+                  {it.value}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
@@ -1199,6 +1377,219 @@ function SelectField({
     </>
   );
 }
+
+// ============================================================================
+// Transfer dialog — move savings from personal pot to common fund
+// ============================================================================
+
+function TransferDialog({
+  open, onOpenChange, onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onSaved: (row: WeddingSavingsRow) => void;
+}) {
+  const [from, setFrom] = useState<"groom" | "bride">("groom");
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const action = createSavingEntry;
+  const [state, formAction, pending] = useActionState<
+    { error?: string; ok?: true; data?: WeddingSavingsRow } | null,
+    FormData
+  >(action, null);
+
+  useEffect(() => {
+    if (state?.ok && state?.data) {
+      onSaved(state.data);
+      onOpenChange(false);
+    }
+  }, [state, onOpenChange, onSaved]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Transfer to <em>Common fund</em></DialogTitle>
+          <DialogDescription>
+            Move savings from a personal pot to the shared wedding fund.
+          </DialogDescription>
+        </DialogHeader>
+        <form action={formAction} className="flex flex-col gap-4 mt-2">
+          {/* Hidden fields */}
+          <input type="hidden" name="contributor" value="both" />
+          <input type="hidden" name="source" value={`Transfer from ${from === "groom" ? "Groom" : "Bride"}`} />
+
+          <div className="flex flex-col gap-2">
+            <Label>Transfer from</Label>
+            <div className="flex gap-2">
+              {(["groom", "bride"] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setFrom(p)}
+                  className={`flex-1 py-2.5 rounded-[4px] text-[13px] border transition-all ${
+                    from === p
+                      ? p === "groom"
+                        ? "bg-sage/10 border-sage text-sage font-medium"
+                        : "bg-rose/10 border-rose text-rose font-medium"
+                      : "border-line text-ink-soft hover:border-ink-soft"
+                  }`}
+                >
+                  {p === "groom" ? "👨 Groom" : "👰 Bride"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3.5">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="t-amount">Amount (€)</Label>
+              <Input id="t-amount" name="amount" type="number" min="0" step="1" placeholder="5000" required autoFocus />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="t-date">Date</Label>
+              <Input id="t-date" name="saved_on" type="date" defaultValue={todayIso} required />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="t-notes">Notes (optional)</Label>
+            <Input id="t-notes" name="notes" placeholder="e.g. After the wedding ceremony…" />
+          </div>
+
+          {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
+            <Button type="submit" disabled={pending}>{pending ? "Transferring…" : "Transfer"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================================================
+// Expanded savings dialog — full list with search + filters
+// ============================================================================
+
+function ExpandedSavingsDialog({
+  open, onOpenChange, savings, onEdit, onDelete, onAdd,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  savings: WeddingSavingsRow[];
+  onEdit: (s: WeddingSavingsRow) => void;
+  onDelete: (s: WeddingSavingsRow) => void;
+  onAdd: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [contributorFilter, setContributorFilter] = useState("all");
+  const [sortKey, setSortKey] = useState<"date" | "amount">("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  function toggleSort(key: "date" | "amount") {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir("desc"); }
+  }
+
+  const rows = useMemo(() => {
+    let out = [...savings];
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      out = out.filter((s) => (s.source ?? "").toLowerCase().includes(q) || (s.notes ?? "").toLowerCase().includes(q));
+    }
+    if (contributorFilter !== "all") out = out.filter((s) => s.contributor === contributorFilter);
+    out.sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === "date") cmp = a.saved_on.localeCompare(b.saved_on);
+      else cmp = a.amount - b.amount;
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return out;
+  }, [savings, search, contributorFilter, sortKey, sortDir]);
+
+  const filterSelect = "h-8 text-[12px] rounded border border-line bg-paper px-2 text-ink focus:outline-none";
+
+  function SortTh({ col, label }: { col: "date" | "amount"; label: string }) {
+    const active = sortKey === col;
+    return (
+      <th
+        className="cursor-pointer select-none hover:text-ink transition-colors"
+        onClick={() => toggleSort(col)}
+      >
+        {label} {active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
+      </th>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[80vw] w-[80vw]">
+        <DialogHeader>
+          <DialogTitle>All <em>savings</em></DialogTitle>
+          <DialogDescription>{savings.length} total · showing {rows.length}</DialogDescription>
+        </DialogHeader>
+        <div className="flex gap-2 flex-wrap items-center">
+          <Input placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8 text-[12px] w-40" />
+          <select value={contributorFilter} onChange={(e) => setContributorFilter(e.target.value)} className={filterSelect}>
+            <option value="all">All contributors</option>
+            <option value="groom">Groom</option>
+            <option value="bride">Bride</option>
+            <option value="both">Common fund</option>
+          </select>
+          <Button size="sm" onClick={onAdd} className="ml-auto text-[12px]">+ Log savings</Button>
+        </div>
+        <div className="overflow-auto max-h-[60vh]">
+          <table className="budget-table w-full">
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Contributor</th>
+                <SortTh col="date" label="Date" />
+                <SortTh col="amount" label="Amount" />
+                <th>Notes</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((s) => (
+                <tr key={s.id} className="cursor-pointer hover:bg-cream/30 transition-colors" onClick={() => { onEdit(s); onOpenChange(false); }}>
+                  <td className="font-medium">{s.source ?? "—"}</td>
+                  <td>
+                    <span className={`text-[10px] uppercase tracking-[0.15em] px-2 py-0.5 rounded-full border ${
+                      s.contributor === "groom" ? "border-sage/50 text-sage bg-sage/10" :
+                      s.contributor === "bride" ? "border-rose/50 text-rose bg-rose/10" :
+                      "border-gold/50 text-gold bg-gold/10"
+                    }`}>
+                      {s.contributor === "both" ? "Common" : s.contributor}
+                    </span>
+                  </td>
+                  <td className="text-ink-soft">{formatDate(s.saved_on)}</td>
+                  <td className="num font-mono text-sage">+{formatMoney(s.amount)}</td>
+                  <td className="text-ink-soft italic text-[12px]">{s.notes ?? "—"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="text-ink-soft hover:text-burgundy text-[18px] transition-colors"
+                      onClick={(e) => { e.stopPropagation(); onDelete(s); }}
+                      aria-label="Delete"
+                    >×</button>
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={6} className="text-center text-ink-soft italic py-8">No entries match your filters.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================================================
+// Budget dialog
+// ============================================================================
 
 function BudgetDialog({
   open, onOpenChange, editing, onSaved,
