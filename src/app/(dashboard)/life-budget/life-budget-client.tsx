@@ -197,6 +197,7 @@ export function LifeBudgetClient({
   const [purchaseDialog, setPurchaseDialog] = useState<{ open: boolean; editing: LifePurchaseRow | null }>({ open: false, editing: null });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [view, setView] = useState<"joint" | "groom" | "bride">("joint");
+  const [expandedSection, setExpandedSection] = useState<"income" | "expense" | "purchase" | null>(null);
 
   const [, startTransition] = useTransition();
 
@@ -293,6 +294,24 @@ export function LifeBudgetClient({
     setPurchases((prev) => prev.map((p) => (p.id === item.id ? { ...p, scheduled: next } : p)));
     startTransition(() => { togglePurchaseScheduled(item.id, next); });
   };
+
+  // ---- Preview slices (3 most recent / soonest) --------------------------
+  const recentIncome = useMemo(() =>
+    [...income].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 3),
+    [income]);
+  const recentExpenses = useMemo(() =>
+    [...expenses].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 3),
+    [expenses]);
+  const recentPurchases = useMemo(() => {
+    const today = dateToMonth(new Date());
+    return [...purchases].sort((a, b) => {
+      const af = a.target_month >= today, bf = b.target_month >= today;
+      if (af && !bf) return -1;
+      if (!af && bf) return 1;
+      if (af) return a.target_month.localeCompare(b.target_month);
+      return b.target_month.localeCompare(a.target_month);
+    }).slice(0, 3);
+  }, [purchases]);
 
   // ---- Render -------------------------------------------------------------
   return (
@@ -410,8 +429,10 @@ export function LifeBudgetClient({
           emoji="💼"
           accent="sage"
           empty="Add salaries or other monthly income."
+          totalCount={income.length}
           onAdd={() => setIncomeDialog({ open: true, editing: null })}
-          items={income.map((i) => ({
+          onViewAll={() => setExpandedSection("income")}
+          items={recentIncome.map((i) => ({
             id: i.id,
             primary: i.name,
             secondary: `${personLabel(i.person)}${i.start_month ? ` · from ${monthLabel(i.start_month)}` : ""}${i.end_month ? ` · until ${monthLabel(i.end_month)}` : ""}`,
@@ -427,8 +448,10 @@ export function LifeBudgetClient({
           emoji="🔁"
           accent="burgundy"
           empty="Add rent, utilities, subscriptions…"
+          totalCount={expenses.length}
           onAdd={() => setExpenseDialog({ open: true, editing: null })}
-          items={expenses.map((e) => ({
+          onViewAll={() => setExpandedSection("expense")}
+          items={recentExpenses.map((e) => ({
             id: e.id,
             primary: e.name,
             secondary: e.expense_type === "credit"
@@ -446,23 +469,26 @@ export function LifeBudgetClient({
           emoji="🛋️"
           accent="gold"
           empty="Plan furniture, appliances, big buys."
+          totalCount={purchases.length}
           onAdd={() => setPurchaseDialog({ open: true, editing: null })}
-          items={purchases.map((p) => {
+          onViewAll={() => setExpandedSection("purchase")}
+          items={recentPurchases.map((p) => {
             const paid = Number(p.already_paid ?? 0);
             const remaining = Math.max(0, Number(p.amount) - paid);
             return {
-            id: p.id,
-            primary: p.name,
-            secondary: paid > 0
-              ? `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${formatMoney(paid)} paid of ${formatMoney(p.amount)} · ${payerLabel(p.payer, p.payer_groom_pct)}`
-              : `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${payerLabel(p.payer, p.payer_groom_pct)}`,
-            value: paid > 0 ? `−${formatMoney(remaining)}` : `−${formatMoney(p.amount)}`,
-            valueClass: p.scheduled ? (remaining === 0 ? "text-sage" : "text-burgundy") : "text-ink-soft line-through",
-            onClick: () => setPurchaseDialog({ open: true, editing: p }),
-            onDelete: () => handleDeletePurchase(p),
-            onToggle: () => handleToggleScheduled(p),
-            toggled: p.scheduled,
-          };})}
+              id: p.id,
+              primary: p.name,
+              secondary: paid > 0
+                ? `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${formatMoney(paid)} paid of ${formatMoney(p.amount)} · ${payerLabel(p.payer, p.payer_groom_pct)}`
+                : `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${payerLabel(p.payer, p.payer_groom_pct)}`,
+              value: paid > 0 ? `−${formatMoney(remaining)}` : `−${formatMoney(p.amount)}`,
+              valueClass: p.scheduled ? (remaining === 0 ? "text-sage" : "text-burgundy") : "text-ink-soft line-through",
+              onClick: () => setPurchaseDialog({ open: true, editing: p }),
+              onDelete: () => handleDeletePurchase(p),
+              onToggle: () => handleToggleScheduled(p),
+              toggled: p.scheduled,
+            };
+          })}
         />
       </div>
       </>
@@ -483,6 +509,39 @@ export function LifeBudgetClient({
             else if (type === "expense") setExpenseDialog({ open: true, editing: null });
             else setPurchaseDialog({ open: true, editing: null });
           }}
+        />
+      )}
+
+      {/* Expanded section dialogs */}
+      {expandedSection === "income" && (
+        <ExpandedIncomeDialog
+          open
+          onOpenChange={(o) => { if (!o) setExpandedSection(null); }}
+          income={income}
+          onEdit={(i) => { setExpandedSection(null); setIncomeDialog({ open: true, editing: i }); }}
+          onDelete={handleDeleteIncome}
+          onAdd={() => { setExpandedSection(null); setIncomeDialog({ open: true, editing: null }); }}
+        />
+      )}
+      {expandedSection === "expense" && (
+        <ExpandedExpensesDialog
+          open
+          onOpenChange={(o) => { if (!o) setExpandedSection(null); }}
+          expenses={expenses}
+          onEdit={(e) => { setExpandedSection(null); setExpenseDialog({ open: true, editing: e }); }}
+          onDelete={handleDeleteExpense}
+          onAdd={() => { setExpandedSection(null); setExpenseDialog({ open: true, editing: null }); }}
+        />
+      )}
+      {expandedSection === "purchase" && (
+        <ExpandedPurchasesDialog
+          open
+          onOpenChange={(o) => { if (!o) setExpandedSection(null); }}
+          purchases={purchases}
+          onEdit={(p) => { setExpandedSection(null); setPurchaseDialog({ open: true, editing: p }); }}
+          onDelete={handleDeletePurchase}
+          onToggleScheduled={handleToggleScheduled}
+          onAdd={() => { setExpandedSection(null); setPurchaseDialog({ open: true, editing: null }); }}
         />
       )}
 
@@ -1517,7 +1576,7 @@ type SectionItem = {
 };
 
 function SectionCard({
-  title, emoji, accent, empty, items, onAdd,
+  title, emoji, accent, empty, items, onAdd, totalCount, onViewAll,
 }: {
   title: string;
   emoji: string;
@@ -1525,8 +1584,11 @@ function SectionCard({
   empty: string;
   items: SectionItem[];
   onAdd: () => void;
+  totalCount?: number;
+  onViewAll?: () => void;
 }) {
   const accentBorder = accent === "sage" ? "border-l-sage" : accent === "burgundy" ? "border-l-burgundy" : "border-l-gold";
+  const hasMore = totalCount !== undefined && totalCount > items.length;
 
   return (
     <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] shadow-soft flex flex-col`}>
@@ -1534,6 +1596,9 @@ function SectionCard({
         <div className="flex items-center gap-2">
           <span className="text-[16px]">{emoji}</span>
           <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">{title}</span>
+          {totalCount !== undefined && totalCount > 0 && (
+            <span className="text-[10px] bg-cream-deep text-ink-soft rounded-full px-1.5 py-0.5 font-mono">{totalCount}</span>
+          )}
         </div>
         <Button variant="ghost" size="sm" onClick={onAdd}>+ Add</Button>
       </div>
@@ -1544,38 +1609,50 @@ function SectionCard({
           <Button onClick={onAdd}>+ Add first</Button>
         </div>
       ) : (
-        <ul className="divide-y divide-line">
-          {items.map((it) => (
-            <li key={it.id} className="group flex items-center gap-3 px-5 py-3 hover:bg-cream/30">
-              {it.onToggle && (
+        <>
+          <ul className="divide-y divide-line">
+            {items.map((it) => (
+              <li key={it.id} className="group flex items-center gap-3 px-5 py-3 hover:bg-cream/30">
+                {it.onToggle && (
+                  <button
+                    type="button"
+                    onClick={it.onToggle}
+                    className={`w-3.5 h-3.5 rounded-sm border shrink-0 transition-colors ${it.toggled ? "bg-gold border-gold" : "bg-transparent border-line"}`}
+                    aria-label={it.toggled ? "Disable" : "Enable"}
+                    title={it.toggled ? "Scheduled — click to exclude from projection" : "Excluded — click to include"}
+                  />
+                )}
                 <button
                   type="button"
-                  onClick={it.onToggle}
-                  className={`w-3.5 h-3.5 rounded-sm border shrink-0 transition-colors ${it.toggled ? "bg-gold border-gold" : "bg-transparent border-line"}`}
-                  aria-label={it.toggled ? "Disable" : "Enable"}
-                  title={it.toggled ? "Scheduled — click to exclude from projection" : "Excluded — click to include"}
-                />
-              )}
-              <button
-                type="button"
-                onClick={it.onClick}
-                className="flex-1 min-w-0 text-left"
-              >
-                <div className="font-medium text-ink truncate">{it.primary}</div>
-                <div className="text-[11px] text-ink-soft truncate">{it.secondary}</div>
-              </button>
-              <div className={`font-mono text-[13px] shrink-0 ${it.valueClass}`}>{it.value}</div>
-              <button
-                type="button"
-                onClick={it.onDelete}
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-ink-soft hover:text-burgundy text-[18px] shrink-0"
-                aria-label="Delete"
-              >
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
+                  onClick={it.onClick}
+                  className="flex-1 min-w-0 text-left"
+                >
+                  <div className="font-medium text-ink truncate">{it.primary}</div>
+                  <div className="text-[11px] text-ink-soft truncate">{it.secondary}</div>
+                </button>
+                <div className={`font-mono text-[13px] shrink-0 ${it.valueClass}`}>{it.value}</div>
+                <button
+                  type="button"
+                  onClick={it.onDelete}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-ink-soft hover:text-burgundy text-[18px] shrink-0"
+                  aria-label="Delete"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+          {hasMore && onViewAll && (
+            <button
+              type="button"
+              onClick={onViewAll}
+              className="flex items-center justify-center gap-1.5 px-5 py-2.5 border-t border-line text-[11px] text-ink-soft hover:text-ink hover:bg-cream/40 transition-colors"
+            >
+              Show all {totalCount} items
+              <span className="text-[10px] opacity-60">↗</span>
+            </button>
+          )}
+        </>
       )}
     </div>
   );
@@ -2007,6 +2084,324 @@ function PurchaseDialog({
             <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================================================
+// Expanded section dialogs — full table with filters + sort
+// ============================================================================
+
+function SortHeader({ label, col, active, dir, onClick }: {
+  label: string; col: string; active: string; dir: "asc" | "desc"; onClick: () => void;
+}) {
+  const on = active === col;
+  return (
+    <th className="text-left py-2.5 px-3 cursor-pointer select-none hover:text-ink transition-colors whitespace-nowrap text-[10px] uppercase tracking-[0.15em] font-medium" onClick={onClick}>
+      <span className="flex items-center gap-1">
+        {label}
+        <span className={`transition-colors ${on ? "text-ink" : "text-ink-soft/30"}`}>{on ? (dir === "asc" ? "↑" : "↓") : "↕"}</span>
+      </span>
+    </th>
+  );
+}
+
+const filterSelect = "h-8 border border-line rounded-[4px] px-2 text-[12px] bg-paper text-ink focus:outline-none focus:ring-1 focus:ring-ink/20";
+
+function ExpandedIncomeDialog({ open, onOpenChange, income, onEdit, onDelete, onAdd }: {
+  open: boolean; onOpenChange: (o: boolean) => void;
+  income: LifeIncomeRow[];
+  onEdit: (i: LifeIncomeRow) => void;
+  onDelete: (i: LifeIncomeRow) => void;
+  onAdd: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [personFilter, setPersonFilter] = useState("all");
+  const [sortCol, setSortCol] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const rows = useMemo(() => {
+    let r = [...income];
+    if (search) r = r.filter((i) => i.name.toLowerCase().includes(search.toLowerCase()));
+    if (personFilter !== "all") r = r.filter((i) => i.person === personFilter);
+    r.sort((a, b) => {
+      let c = 0;
+      if (sortCol === "name") c = a.name.localeCompare(b.name);
+      else if (sortCol === "amount") c = Number(a.amount) - Number(b.amount);
+      else if (sortCol === "person") c = a.person.localeCompare(b.person);
+      else if (sortCol === "start_month") c = (a.start_month ?? "").localeCompare(b.start_month ?? "");
+      else c = a.created_at.localeCompare(b.created_at);
+      return sortDir === "asc" ? c : -c;
+    });
+    return r;
+  }, [income, search, personFilter, sortCol, sortDir]);
+
+  const ts = (col: string) => { if (sortCol === col) setSortDir((d) => d === "asc" ? "desc" : "asc"); else { setSortCol(col); setSortDir("asc"); } };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Income <em>streams</em></DialogTitle>
+          <DialogDescription>{income.length} total · showing {rows.length}</DialogDescription>
+        </DialogHeader>
+        <div className="flex gap-2 flex-wrap items-center">
+          <Input placeholder="Search by name…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8 text-[12px] w-44" />
+          <select value={personFilter} onChange={(e) => setPersonFilter(e.target.value)} className={filterSelect}>
+            <option value="all">All persons</option>
+            <option value="groom">Groom</option>
+            <option value="bride">Bride</option>
+            <option value="both">Both / Common</option>
+          </select>
+          <Button size="sm" className="ml-auto" onClick={onAdd}>+ Add</Button>
+        </div>
+        <div className="overflow-auto max-h-[55vh] border border-line rounded-[4px]">
+          <table className="w-full text-[12px]">
+            <thead className="sticky top-0 bg-cream-deep/95 backdrop-blur-sm border-b border-line">
+              <tr className="text-ink-soft">
+                <SortHeader label="Name" col="name" active={sortCol} dir={sortDir} onClick={() => ts("name")} />
+                <SortHeader label="Earner" col="person" active={sortCol} dir={sortDir} onClick={() => ts("person")} />
+                <SortHeader label="Monthly" col="amount" active={sortCol} dir={sortDir} onClick={() => ts("amount")} />
+                <SortHeader label="From" col="start_month" active={sortCol} dir={sortDir} onClick={() => ts("start_month")} />
+                <th className="text-left py-2.5 px-3 text-[10px] uppercase tracking-[0.15em] font-medium">Until</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((i) => (
+                <tr key={i.id} className="border-t border-line/50 hover:bg-cream/40 cursor-pointer group" onClick={() => onEdit(i)}>
+                  <td className="py-2.5 px-3 font-medium text-ink">{i.name}</td>
+                  <td className="py-2.5 px-3 text-ink-soft">{personLabel(i.person)}</td>
+                  <td className="py-2.5 px-3 font-mono text-sage">+{formatMoney(i.amount)}</td>
+                  <td className="py-2.5 px-3 text-ink-soft">{i.start_month ? monthLabel(i.start_month) : <em>Always</em>}</td>
+                  <td className="py-2.5 px-3 text-ink-soft">{i.end_month ? monthLabel(i.end_month) : <em>Open</em>}</td>
+                  <td className="py-2.5 px-3">
+                    <button onClick={(e) => { e.stopPropagation(); onDelete(i); }} className="opacity-0 group-hover:opacity-100 text-ink-soft hover:text-burgundy text-[16px] transition-opacity">×</button>
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && <tr><td colSpan={6} className="py-8 text-center text-ink-soft italic text-[13px]">No results.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ExpandedExpensesDialog({ open, onOpenChange, expenses, onEdit, onDelete, onAdd }: {
+  open: boolean; onOpenChange: (o: boolean) => void;
+  expenses: LifeExpenseRow[];
+  onEdit: (e: LifeExpenseRow) => void;
+  onDelete: (e: LifeExpenseRow) => void;
+  onAdd: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [payerFilter, setPayerFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [sortCol, setSortCol] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const categories = useMemo(() => [...new Set(expenses.map((e) => e.category).filter(Boolean))].sort(), [expenses]);
+
+  const rows = useMemo(() => {
+    let r = [...expenses];
+    if (search) r = r.filter((e) => e.name.toLowerCase().includes(search.toLowerCase()));
+    if (categoryFilter !== "all") r = r.filter((e) => e.category === categoryFilter);
+    if (payerFilter !== "all") r = r.filter((e) => e.payer === payerFilter);
+    if (typeFilter !== "all") r = r.filter((e) => e.expense_type === typeFilter);
+    r.sort((a, b) => {
+      let c = 0;
+      if (sortCol === "name") c = a.name.localeCompare(b.name);
+      else if (sortCol === "amount") c = Number(a.amount) - Number(b.amount);
+      else if (sortCol === "category") c = (a.category ?? "").localeCompare(b.category ?? "");
+      else if (sortCol === "payer") c = a.payer.localeCompare(b.payer);
+      else c = a.created_at.localeCompare(b.created_at);
+      return sortDir === "asc" ? c : -c;
+    });
+    return r;
+  }, [expenses, search, categoryFilter, payerFilter, typeFilter, sortCol, sortDir]);
+
+  const ts = (col: string) => { if (sortCol === col) setSortDir((d) => d === "asc" ? "desc" : "asc"); else { setSortCol(col); setSortDir("asc"); } };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>Recurring <em>expenses</em></DialogTitle>
+          <DialogDescription>{expenses.length} total · showing {rows.length}</DialogDescription>
+        </DialogHeader>
+        <div className="flex gap-2 flex-wrap items-center">
+          <Input placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8 text-[12px] w-40" />
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className={filterSelect}>
+            <option value="all">All categories</option>
+            {categories.map((c) => <option key={c!} value={c!}>{c}</option>)}
+          </select>
+          <select value={payerFilter} onChange={(e) => setPayerFilter(e.target.value)} className={filterSelect}>
+            <option value="all">All payers</option>
+            <option value="groom">Groom</option>
+            <option value="bride">Bride</option>
+            <option value="both">Both</option>
+          </select>
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={filterSelect}>
+            <option value="all">All types</option>
+            <option value="fixed">Fixed</option>
+            <option value="credit">Credit</option>
+          </select>
+          <Button size="sm" className="ml-auto" onClick={onAdd}>+ Add</Button>
+        </div>
+        <div className="overflow-auto max-h-[55vh] border border-line rounded-[4px]">
+          <table className="w-full text-[12px]">
+            <thead className="sticky top-0 bg-cream-deep/95 backdrop-blur-sm border-b border-line">
+              <tr className="text-ink-soft">
+                <SortHeader label="Name" col="name" active={sortCol} dir={sortDir} onClick={() => ts("name")} />
+                <SortHeader label="Category" col="category" active={sortCol} dir={sortDir} onClick={() => ts("category")} />
+                <SortHeader label="Payer" col="payer" active={sortCol} dir={sortDir} onClick={() => ts("payer")} />
+                <SortHeader label="Monthly" col="amount" active={sortCol} dir={sortDir} onClick={() => ts("amount")} />
+                <th className="text-left py-2.5 px-3 text-[10px] uppercase tracking-[0.15em] font-medium">Period</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((e) => (
+                <tr key={e.id} className="border-t border-line/50 hover:bg-cream/40 cursor-pointer group" onClick={() => onEdit(e)}>
+                  <td className="py-2.5 px-3 font-medium text-ink">
+                    {e.name}
+                    {e.expense_type === "credit" && <span className="ml-1.5 text-[9px] bg-gold/15 text-gold rounded px-1.5 py-0.5 font-medium">Credit</span>}
+                  </td>
+                  <td className="py-2.5 px-3 text-ink-soft">{e.category ?? "—"}</td>
+                  <td className="py-2.5 px-3 text-ink-soft">{payerLabel(e.payer, e.payer_groom_pct)}</td>
+                  <td className="py-2.5 px-3 font-mono text-burgundy">−{formatMoney(e.amount)}</td>
+                  <td className="py-2.5 px-3 text-ink-soft text-[11px]">
+                    {e.start_month ? monthLabel(e.start_month) : <em>Always</em>}
+                    {(e.start_month || e.end_month) && " → "}
+                    {e.end_month ? monthLabel(e.end_month) : e.start_month ? <em>Open</em> : ""}
+                  </td>
+                  <td className="py-2.5 px-3">
+                    <button onClick={(ev) => { ev.stopPropagation(); onDelete(e); }} className="opacity-0 group-hover:opacity-100 text-ink-soft hover:text-burgundy text-[16px] transition-opacity">×</button>
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && <tr><td colSpan={6} className="py-8 text-center text-ink-soft italic text-[13px]">No results.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ExpandedPurchasesDialog({ open, onOpenChange, purchases, onEdit, onDelete, onToggleScheduled, onAdd }: {
+  open: boolean; onOpenChange: (o: boolean) => void;
+  purchases: LifePurchaseRow[];
+  onEdit: (p: LifePurchaseRow) => void;
+  onDelete: (p: LifePurchaseRow) => void;
+  onToggleScheduled: (p: LifePurchaseRow) => void;
+  onAdd: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [payerFilter, setPayerFilter] = useState("all");
+  const [scheduledFilter, setScheduledFilter] = useState("all");
+  const [sortCol, setSortCol] = useState("target_month");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const categories = useMemo(() => [...new Set(purchases.map((p) => p.category).filter(Boolean))].sort(), [purchases]);
+
+  const rows = useMemo(() => {
+    let r = [...purchases];
+    if (search) r = r.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
+    if (categoryFilter !== "all") r = r.filter((p) => p.category === categoryFilter);
+    if (payerFilter !== "all") r = r.filter((p) => p.payer === payerFilter);
+    if (scheduledFilter === "scheduled") r = r.filter((p) => p.scheduled);
+    if (scheduledFilter === "excluded") r = r.filter((p) => !p.scheduled);
+    r.sort((a, b) => {
+      let c = 0;
+      if (sortCol === "name") c = a.name.localeCompare(b.name);
+      else if (sortCol === "amount") c = Number(a.amount) - Number(b.amount);
+      else if (sortCol === "remaining") c = Math.max(0, Number(a.amount) - Number(a.already_paid ?? 0)) - Math.max(0, Number(b.amount) - Number(b.already_paid ?? 0));
+      else if (sortCol === "category") c = (a.category ?? "").localeCompare(b.category ?? "");
+      else c = a.target_month.localeCompare(b.target_month);
+      return sortDir === "asc" ? c : -c;
+    });
+    return r;
+  }, [purchases, search, categoryFilter, payerFilter, scheduledFilter, sortCol, sortDir]);
+
+  const ts = (col: string) => { if (sortCol === col) setSortDir((d) => d === "asc" ? "desc" : "asc"); else { setSortCol(col); setSortDir("asc"); } };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>One-time <em>purchases</em></DialogTitle>
+          <DialogDescription>{purchases.length} total · showing {rows.length}</DialogDescription>
+        </DialogHeader>
+        <div className="flex gap-2 flex-wrap items-center">
+          <Input placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8 text-[12px] w-40" />
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className={filterSelect}>
+            <option value="all">All categories</option>
+            {categories.map((c) => <option key={c!} value={c!}>{c}</option>)}
+          </select>
+          <select value={payerFilter} onChange={(e) => setPayerFilter(e.target.value)} className={filterSelect}>
+            <option value="all">All payers</option>
+            <option value="groom">Groom</option>
+            <option value="bride">Bride</option>
+            <option value="both">Both</option>
+          </select>
+          <select value={scheduledFilter} onChange={(e) => setScheduledFilter(e.target.value)} className={filterSelect}>
+            <option value="all">All</option>
+            <option value="scheduled">Scheduled only</option>
+            <option value="excluded">Excluded only</option>
+          </select>
+          <Button size="sm" className="ml-auto" onClick={onAdd}>+ Add</Button>
+        </div>
+        <div className="overflow-auto max-h-[55vh] border border-line rounded-[4px]">
+          <table className="w-full text-[12px]">
+            <thead className="sticky top-0 bg-cream-deep/95 backdrop-blur-sm border-b border-line">
+              <tr className="text-ink-soft">
+                <th className="w-10 py-2.5 px-3" />
+                <SortHeader label="Name" col="name" active={sortCol} dir={sortDir} onClick={() => ts("name")} />
+                <SortHeader label="Category" col="category" active={sortCol} dir={sortDir} onClick={() => ts("category")} />
+                <SortHeader label="Month" col="target_month" active={sortCol} dir={sortDir} onClick={() => ts("target_month")} />
+                <SortHeader label="Total" col="amount" active={sortCol} dir={sortDir} onClick={() => ts("amount")} />
+                <SortHeader label="Remaining" col="remaining" active={sortCol} dir={sortDir} onClick={() => ts("remaining")} />
+                <th className="text-left py-2.5 px-3 text-[10px] uppercase tracking-[0.15em] font-medium">Payer</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((p) => {
+                const remaining = Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0));
+                return (
+                  <tr key={p.id} className={`border-t border-line/50 hover:bg-cream/40 cursor-pointer group ${!p.scheduled ? "opacity-50" : ""}`} onClick={() => onEdit(p)}>
+                    <td className="py-2.5 px-3">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onToggleScheduled(p); }}
+                        className={`w-3.5 h-3.5 rounded-sm border transition-colors ${p.scheduled ? "bg-gold border-gold" : "bg-transparent border-line"}`}
+                        title={p.scheduled ? "Exclude from projection" : "Include in projection"}
+                      />
+                    </td>
+                    <td className="py-2.5 px-3 font-medium text-ink">{p.name}</td>
+                    <td className="py-2.5 px-3 text-ink-soft">{p.category ?? "—"}</td>
+                    <td className="py-2.5 px-3 font-mono text-ink-soft">{monthLabel(p.target_month)}</td>
+                    <td className="py-2.5 px-3 font-mono text-ink">{formatMoney(p.amount)}</td>
+                    <td className={`py-2.5 px-3 font-mono ${remaining === 0 ? "text-sage" : "text-burgundy"}`}>
+                      {remaining === 0 ? "Paid ✓" : `−${formatMoney(remaining)}`}
+                    </td>
+                    <td className="py-2.5 px-3 text-ink-soft">{payerLabel(p.payer, p.payer_groom_pct)}</td>
+                    <td className="py-2.5 px-3">
+                      <button onClick={(e) => { e.stopPropagation(); onDelete(p); }} className="opacity-0 group-hover:opacity-100 text-ink-soft hover:text-burgundy text-[16px] transition-opacity">×</button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {rows.length === 0 && <tr><td colSpan={8} className="py-8 text-center text-ink-soft italic text-[13px]">No results.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </DialogContent>
     </Dialog>
   );
