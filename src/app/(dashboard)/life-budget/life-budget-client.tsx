@@ -43,7 +43,7 @@ import {
 
 const EXPENSE_CATEGORIES = [
   "Rent", "Mortgage", "Credit", "Utilities", "Internet", "Phone",
-  "Insurance", "Food", "Transport", "Subscriptions", "Other",
+  "Insurance", "Food", "Transport", "Subscriptions", "Wedding", "Other",
 ];
 
 const PURCHASE_CATEGORIES = [
@@ -221,7 +221,7 @@ export function LifeBudgetClient({
 
       const monthPurchases = purchases
         .filter((p) => p.scheduled && p.target_month === month)
-        .reduce((a, p) => a + Number(p.amount), 0);
+        .reduce((a, p) => a + Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)), 0);
 
       const totalOut = monthFixed + monthPurchases;
       const net = monthIncome - totalOut;
@@ -447,17 +447,22 @@ export function LifeBudgetClient({
           accent="gold"
           empty="Plan furniture, appliances, big buys."
           onAdd={() => setPurchaseDialog({ open: true, editing: null })}
-          items={purchases.map((p) => ({
+          items={purchases.map((p) => {
+            const paid = Number(p.already_paid ?? 0);
+            const remaining = Math.max(0, Number(p.amount) - paid);
+            return {
             id: p.id,
             primary: p.name,
-            secondary: `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${payerLabel(p.payer, p.payer_groom_pct)}`,
-            value: `−${formatMoney(p.amount)}`,
-            valueClass: p.scheduled ? "text-burgundy" : "text-ink-soft line-through",
+            secondary: paid > 0
+              ? `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${formatMoney(paid)} paid of ${formatMoney(p.amount)} · ${payerLabel(p.payer, p.payer_groom_pct)}`
+              : `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${payerLabel(p.payer, p.payer_groom_pct)}`,
+            value: paid > 0 ? `−${formatMoney(remaining)}` : `−${formatMoney(p.amount)}`,
+            valueClass: p.scheduled ? (remaining === 0 ? "text-sage" : "text-burgundy") : "text-ink-soft line-through",
             onClick: () => setPurchaseDialog({ open: true, editing: p }),
             onDelete: () => handleDeletePurchase(p),
             onToggle: () => handleToggleScheduled(p),
             toggled: p.scheduled,
-          }))}
+          };})}
         />
       </div>
       </>
@@ -1049,10 +1054,10 @@ function PersonView({
       .reduce((a, e) => a + Number(e.amount) * personShare(e.payer, e.payer_groom_pct, person), 0);
     const myPurch = purchases
       .filter((p) => p.scheduled && p.target_month === m && p.payer === person)
-      .reduce((a, p) => a + Number(p.amount), 0);
+      .reduce((a, p) => a + Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)), 0);
     const sharedPurch = purchases
       .filter((p) => p.scheduled && p.target_month === m && p.payer === "both")
-      .reduce((a, p) => a + Number(p.amount) * personShare(p.payer, p.payer_groom_pct, person), 0);
+      .reduce((a, p) => a + Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)) * personShare(p.payer, p.payer_groom_pct, person), 0);
     const totalIn = myIncome + commonIncome;
     const totalOut = myBills + sharedBills + myPurch + sharedPurch;
     return { myIncome, commonIncome, myBills, sharedBills, myPurch, sharedPurch, totalIn, totalOut, net: totalIn - totalOut };
@@ -1077,7 +1082,7 @@ function PersonView({
         .reduce((a, e) => a + Number(e.amount) * personShare(e.payer, e.payer_groom_pct, person), 0);
       const myP = purchases
         .filter((p) => p.scheduled && p.target_month === month)
-        .reduce((a, p) => a + Number(p.amount) * personShare(p.payer, p.payer_groom_pct, person), 0);
+        .reduce((a, p) => a + Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)) * personShare(p.payer, p.payer_groom_pct, person), 0);
       const totalIn = myInc + comInc;
       const totalOut = myExp + shExp + myP;
       const net = totalIn - totalOut;
@@ -1311,11 +1316,12 @@ function PersonView({
                       <div className="text-[11px] text-ink-soft truncate">
                         {monthLabel(p.target_month)}
                         {p.payer === "both" ? <span className="text-gold"> · ⇄ shared {Math.round(share * 100)}%</span> : " · Personal"}
+                        {Number(p.already_paid ?? 0) > 0 && <span className="text-sage"> · {formatMoney(Number(p.already_paid))} paid</span>}
                         {!p.scheduled && " · excluded"}
                       </div>
                     </div>
                     <div className={`font-mono text-[12px] shrink-0 ${p.scheduled ? "text-gold" : "text-ink-soft line-through"}`}>
-                      −{formatMoney(Number(p.amount) * share)}
+                      −{formatMoney(Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)) * share)}
                     </div>
                   </li>
                 );
@@ -1424,7 +1430,7 @@ function PersonMonthly({
       .reduce((a, e) => a + Number(e.amount) * personShare(e.payer, e.payer_groom_pct, person), 0);
     const personPurchases = purchases
       .filter((p) => p.scheduled && p.target_month === m)
-      .reduce((a, p) => a + Number(p.amount) * personShare(p.payer, p.payer_groom_pct, person), 0);
+      .reduce((a, p) => a + Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)) * personShare(p.payer, p.payer_groom_pct, person), 0);
     return {
       income: personIncome,
       expenses: personExpenses,
@@ -1894,11 +1900,20 @@ function PurchaseDialog({
   >(action, null);
 
   const [payer, setPayer] = useState<LifePerson>(editing?.payer ?? "both");
-  useEffect(() => { setPayer(editing?.payer ?? "both"); }, [editing]);
+  const [totalCost, setTotalCost] = useState<number>(Number(editing?.amount ?? 0));
+  const [alreadyPaid, setAlreadyPaid] = useState<number>(Number(editing?.already_paid ?? 0));
+  useEffect(() => {
+    setPayer(editing?.payer ?? "both");
+    setTotalCost(Number(editing?.amount ?? 0));
+    setAlreadyPaid(Number(editing?.already_paid ?? 0));
+  }, [editing]);
 
   useEffect(() => {
     if (state?.ok && state?.data) { onSaved(state.data); onOpenChange(false); }
   }, [state, onSaved, onOpenChange]);
+
+  const remaining = Math.max(0, totalCost - alreadyPaid);
+  const paidPct = totalCost > 0 ? Math.min(100, (alreadyPaid / totalCost) * 100) : 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1914,17 +1929,43 @@ function PurchaseDialog({
           </div>
           <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="amount">Amount (€)</Label>
-              <Input id="amount" name="amount" type="number" min="0" step="1" defaultValue={editing?.amount ?? ""} required />
+              <Label htmlFor="amount">Total cost (€)</Label>
+              <Input id="amount" name="amount" type="number" min="0" step="1"
+                value={totalCost || ""}
+                onChange={(e) => setTotalCost(parseFloat(e.target.value) || 0)}
+                required />
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Category</Label>
-              <SelectField
-                name="category"
-                defaultValue={editing?.category ?? "Furniture"}
-                options={PURCHASE_CATEGORIES.map((c) => ({ value: c, label: c }))}
-              />
+              <Label htmlFor="already_paid">Already paid (€)</Label>
+              <Input id="already_paid" name="already_paid" type="number" min="0" step="1"
+                value={alreadyPaid || ""}
+                onChange={(e) => setAlreadyPaid(parseFloat(e.target.value) || 0)}
+                placeholder="0" />
             </div>
+          </div>
+          {/* Live remaining preview */}
+          {totalCost > 0 && (
+            <div className="bg-cream-deep/60 border border-line rounded-[4px] px-4 py-3 text-[12px] space-y-2">
+              <div className="flex justify-between">
+                <span className="text-ink-soft">Still to pay</span>
+                <span className={`font-mono font-medium ${remaining > 0 ? "text-ink" : "text-sage"}`}>
+                  {remaining > 0 ? formatMoney(remaining) : "Fully paid ✓"}
+                </span>
+              </div>
+              {totalCost > 0 && (
+                <div className="h-1.5 bg-line rounded-full overflow-hidden">
+                  <div className="h-full bg-sage rounded-full transition-all" style={{ width: `${paidPct}%` }} />
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex flex-col gap-2">
+            <Label>Category</Label>
+            <SelectField
+              name="category"
+              defaultValue={editing?.category ?? "Furniture"}
+              options={PURCHASE_CATEGORIES.map((c) => ({ value: c, label: c }))}
+            />
           </div>
           <div className="flex flex-col gap-2">
             <Label>Target month</Label>

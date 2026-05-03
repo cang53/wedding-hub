@@ -155,6 +155,7 @@ export async function deleteExpense(id: string) {
 function parsePurchase(form: FormData) {
   const name = String(form.get("name") ?? "").trim();
   const amount = parseFloat(String(form.get("amount") ?? ""));
+  const already_paid = Math.max(0, parseFloat(String(form.get("already_paid") ?? "0")) || 0);
   const category = String(form.get("category") ?? "").trim() || null;
   const target_month = trimMonth(form.get("target_month"));
   const notes = String(form.get("notes") ?? "").trim() || null;
@@ -163,10 +164,11 @@ function parsePurchase(form: FormData) {
 
   if (!name) return { error: "Please enter a name." };
   if (isNaN(amount) || amount < 0) return { error: "Please enter a valid amount." };
+  if (already_paid > amount) return { error: "Amount already paid cannot exceed total cost." };
   if (!target_month) return { error: "Please select a target month." };
   if (!VALID_PERSONS.includes(payer)) return { error: "Invalid payer." };
 
-  return { name, amount, category, target_month, payer, payer_groom_pct, scheduled, notes };
+  return { name, amount, already_paid, category, target_month, payer, payer_groom_pct, scheduled, notes };
 }
 
 export async function createPurchase(_prev: unknown, form: FormData) {
