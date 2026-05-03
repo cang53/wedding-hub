@@ -43,7 +43,7 @@ import {
 
 const EXPENSE_CATEGORIES = [
   "Rent", "Mortgage", "Credit", "Utilities", "Internet", "Phone",
-  "Insurance", "Food", "Transport", "Subscriptions", "Other",
+  "Insurance", "Food", "Transport", "Subscriptions", "Wedding", "Other",
 ];
 
 const PURCHASE_CATEGORIES = [
