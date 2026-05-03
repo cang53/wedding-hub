@@ -9,8 +9,9 @@ import type {
   LifePerson,
   StartingCashMode,
   ExpenseType,
+  WeddingSavingsRow,
 } from "@/types/db";
-import { formatMoney } from "@/lib/utils";
+import { formatMoney, formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,6 +37,7 @@ import {
   createPurchase, updatePurchase, deletePurchase, togglePurchaseScheduled,
   updateSettings,
 } from "./actions";
+import { createSavingEntry, updateSavingEntry, deleteSavingEntry } from "../budget/savings-actions";
 
 // ============================================================================
 // Constants
@@ -49,6 +51,10 @@ const EXPENSE_CATEGORIES = [
 const PURCHASE_CATEGORIES = [
   "Furniture", "Appliances", "Electronics", "Deposit", "Renovation",
   "Decor", "Vehicle", "Other",
+];
+
+const SAVINGS_SOURCES = [
+  "Celal salary", "Selver salary", "Joint savings", "Family gift", "Bonus", "Other",
 ];
 
 const PERSON_OPTIONS: { value: LifePerson; label: string }[] = [
@@ -177,7 +183,8 @@ interface Props {
   initialExpenses: LifeExpenseRow[];
   initialPurchases: LifePurchaseRow[];
   initialSettings: LifeSettingsRow;
-  weddingCashOnHand: number;
+  initialSavings: WeddingSavingsRow[];
+  totalPaidOnWedding: number;
 }
 
 export function LifeBudgetClient({
@@ -185,23 +192,34 @@ export function LifeBudgetClient({
   initialExpenses,
   initialPurchases,
   initialSettings,
-  weddingCashOnHand,
+  initialSavings,
+  totalPaidOnWedding,
 }: Props) {
   const [income, setIncome] = useState<LifeIncomeRow[]>(initialIncome);
   const [expenses, setExpenses] = useState<LifeExpenseRow[]>(initialExpenses);
   const [purchases, setPurchases] = useState<LifePurchaseRow[]>(initialPurchases);
   const [settings, setSettings] = useState<LifeSettingsRow>(initialSettings);
+  const [savings, setSavings] = useState<WeddingSavingsRow[]>(initialSavings);
 
   const [incomeDialog, setIncomeDialog] = useState<{ open: boolean; editing: LifeIncomeRow | null }>({ open: false, editing: null });
   const [expenseDialog, setExpenseDialog] = useState<{ open: boolean; editing: LifeExpenseRow | null }>({ open: false, editing: null });
   const [purchaseDialog, setPurchaseDialog] = useState<{ open: boolean; editing: LifePurchaseRow | null }>({ open: false, editing: null });
+  const [savingsDialog, setSavingsDialog] = useState<{ open: boolean; editing: WeddingSavingsRow | null }>({ open: false, editing: null });
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [expandedSavingsOpen, setExpandedSavingsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [view, setView] = useState<"joint" | "groom" | "bride">("joint");
   const [expandedSection, setExpandedSection] = useState<"income" | "expense" | "purchase" | null>(null);
 
   const [, startTransition] = useTransition();
 
-  // Starting cash resolves from settings + (optionally) the wedding cash on hand.
+  // Starting cash: total saved minus what's already been paid on the wedding.
+  const weddingCashOnHand = useMemo(
+    () => Math.max(0, savings.reduce((a, s) => a + Number(s.amount), 0) - totalPaidOnWedding),
+    [savings, totalPaidOnWedding]
+  );
+
+  // Starting cash resolves from settings + (optionally) the reactive wedding cash on hand.
   const startingCash = settings.starting_cash_mode === "from_wedding"
     ? weddingCashOnHand
     : Number(settings.starting_cash_manual ?? 0);
@@ -293,6 +311,11 @@ export function LifeBudgetClient({
     const next = !item.scheduled;
     setPurchases((prev) => prev.map((p) => (p.id === item.id ? { ...p, scheduled: next } : p)));
     startTransition(() => { togglePurchaseScheduled(item.id, next); });
+  };
+  const handleDeleteSaving = (item: WeddingSavingsRow) => {
+    if (!confirm(`Delete this entry of ${formatMoney(item.amount)}?`)) return;
+    setSavings((prev) => prev.filter((i) => i.id !== item.id));
+    startTransition(() => { deleteSavingEntry(item.id); });
   };
 
   // ---- Preview slices (3 most recent / soonest) --------------------------
@@ -491,6 +514,28 @@ export function LifeBudgetClient({
           })}
         />
       </div>
+
+      {/* Wedding savings section */}
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Wedding savings</div>
+            <div className="font-serif text-[18px] text-ink mt-0.5">
+              Your pot at the start of life after — <em>{formatMoney(weddingCashOnHand)}</em> cash on hand
+            </div>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="ghost" size="sm" onClick={() => setTransferDialogOpen(true)}>⇄ Transfer to Common</Button>
+            <Button variant="ghost" size="sm" onClick={() => setExpandedSavingsOpen(true)}>Show all ↗</Button>
+            <Button size="sm" onClick={() => setSavingsDialog({ open: true, editing: null })}>+ Log savings</Button>
+          </div>
+        </div>
+        <SavingsPots
+          savings={savings}
+          onEdit={(s) => setSavingsDialog({ open: true, editing: s })}
+          onDelete={handleDeleteSaving}
+        />
+      </div>
       </>
       )}
 
@@ -600,6 +645,40 @@ export function LifeBudgetClient({
               return next.sort((a, b) => a.target_month.localeCompare(b.target_month));
             });
           }}
+        />
+      )}
+
+      {savingsDialog.open && (
+        <SavingsDialog
+          key={savingsDialog.editing?.id ?? "new-saving"}
+          open={savingsDialog.open}
+          onOpenChange={(o) => setSavingsDialog({ open: o, editing: o ? savingsDialog.editing : null })}
+          editing={savingsDialog.editing}
+          onSaved={(row) => {
+            setSavings((prev) => {
+              const exists = prev.some((i) => i.id === row.id);
+              return exists ? prev.map((i) => (i.id === row.id ? row : i)) : [row, ...prev];
+            });
+          }}
+        />
+      )}
+
+      {transferDialogOpen && (
+        <TransferDialog
+          open={transferDialogOpen}
+          onOpenChange={setTransferDialogOpen}
+          onSaved={(row) => setSavings((prev) => [row, ...prev])}
+        />
+      )}
+
+      {expandedSavingsOpen && (
+        <ExpandedSavingsDialog
+          open={expandedSavingsOpen}
+          onOpenChange={setExpandedSavingsOpen}
+          savings={savings}
+          onEdit={(s) => { setSavingsDialog({ open: true, editing: s }); }}
+          onDelete={handleDeleteSaving}
+          onAdd={() => setSavingsDialog({ open: true, editing: null })}
         />
       )}
     </section>
@@ -2406,6 +2485,446 @@ function ExpandedPurchasesDialog({ open, onOpenChange, purchases, onEdit, onDele
     </Dialog>
   );
 }
+
+// ============================================================================
+// Savings pots — three-column visual breakdown
+// ============================================================================
+
+function SavingsPots({
+  savings,
+  onEdit,
+  onDelete,
+}: {
+  savings: WeddingSavingsRow[];
+  onEdit: (s: WeddingSavingsRow) => void;
+  onDelete: (s: WeddingSavingsRow) => void;
+}) {
+  const pots = useMemo(() => {
+    const groomEntries = savings.filter((s) => s.contributor === "groom");
+    const brideEntries = savings.filter((s) => s.contributor === "bride");
+    const commonEntries = savings.filter((s) => s.contributor === "both");
+
+    const groomTotal = groomEntries.reduce((a, s) => a + s.amount, 0);
+    const brideTotal = brideEntries.reduce((a, s) => a + s.amount, 0);
+    const commonTotal = commonEntries.reduce((a, s) => a + s.amount, 0);
+
+    const transferredFromGroom = commonEntries
+      .filter((s) => s.source?.startsWith("Transfer from Groom"))
+      .reduce((a, s) => a + s.amount, 0);
+    const transferredFromBride = commonEntries
+      .filter((s) => s.source?.startsWith("Transfer from Bride"))
+      .reduce((a, s) => a + s.amount, 0);
+
+    const lastGroom = [...groomEntries].sort((a, b) => b.saved_on.localeCompare(a.saved_on))[0];
+    const lastBride = [...brideEntries].sort((a, b) => b.saved_on.localeCompare(a.saved_on))[0];
+    const lastCommon = [...commonEntries].sort((a, b) => b.saved_on.localeCompare(a.saved_on))[0];
+
+    return { groomTotal, brideTotal, commonTotal, transferredFromGroom, transferredFromBride, lastGroom, lastBride, lastCommon };
+  }, [savings]);
+
+  const grandTotal = pots.groomTotal + pots.brideTotal + pots.commonTotal;
+
+  const recentAll = useMemo(
+    () => [...savings].sort((a, b) => b.saved_on.localeCompare(a.saved_on)).slice(0, 5),
+    [savings]
+  );
+
+  if (savings.length === 0) {
+    return (
+      <div className="bg-paper border border-dashed border-line rounded-[4px] p-10 text-center text-ink-soft italic text-[14px]">
+        No savings logged yet — click <strong>+ Log savings</strong> to start tracking.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Three pots */}
+      <div className="grid grid-cols-3 gap-5 max-md:grid-cols-1">
+        {/* Groom */}
+        <div className="bg-paper border border-line border-l-[3px] border-l-sage rounded-[4px] p-6 shadow-soft space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] uppercase tracking-[0.3em] font-medium text-sage">Groom</div>
+            <div className="text-[10px] text-ink-soft">{pots.lastGroom ? formatDate(pots.lastGroom.saved_on) : "—"}</div>
+          </div>
+          <div className="font-serif text-[32px] leading-none text-ink"><em>{formatMoney(pots.groomTotal)}</em></div>
+          {grandTotal > 0 && (
+            <div className="h-1.5 bg-cream-deep rounded-full overflow-hidden">
+              <div className="h-full bg-sage rounded-full" style={{ width: `${Math.min(100, (pots.groomTotal / grandTotal) * 100)}%` }} />
+            </div>
+          )}
+          <div className="space-y-1 text-[12px] text-ink-soft">
+            <div>{pots.lastGroom?.source ?? "—"}</div>
+            {pots.transferredFromGroom > 0 && (
+              <div className="flex items-center gap-1 text-gold">
+                <span>⇄</span><span>{formatMoney(pots.transferredFromGroom)} transferred to common</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Bride */}
+        <div className="bg-paper border border-line border-l-[3px] border-l-rose rounded-[4px] p-6 shadow-soft space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] uppercase tracking-[0.3em] font-medium text-rose">Bride</div>
+            <div className="text-[10px] text-ink-soft">{pots.lastBride ? formatDate(pots.lastBride.saved_on) : "—"}</div>
+          </div>
+          <div className="font-serif text-[32px] leading-none text-ink"><em>{formatMoney(pots.brideTotal)}</em></div>
+          {grandTotal > 0 && (
+            <div className="h-1.5 bg-cream-deep rounded-full overflow-hidden">
+              <div className="h-full bg-rose rounded-full" style={{ width: `${Math.min(100, (pots.brideTotal / grandTotal) * 100)}%` }} />
+            </div>
+          )}
+          <div className="space-y-1 text-[12px] text-ink-soft">
+            <div>{pots.lastBride?.source ?? "—"}</div>
+            {pots.transferredFromBride > 0 && (
+              <div className="flex items-center gap-1 text-gold">
+                <span>⇄</span><span>{formatMoney(pots.transferredFromBride)} transferred to common</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Common fund */}
+        <div className="bg-paper border border-line border-l-[3px] border-l-gold rounded-[4px] p-6 shadow-soft space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] uppercase tracking-[0.3em] font-medium text-gold">Common fund</div>
+            <div className="text-[10px] text-ink-soft">{pots.lastCommon ? formatDate(pots.lastCommon.saved_on) : "—"}</div>
+          </div>
+          <div className="font-serif text-[32px] leading-none text-ink"><em>{formatMoney(pots.commonTotal)}</em></div>
+          {grandTotal > 0 && (
+            <div className="h-1.5 bg-cream-deep rounded-full overflow-hidden">
+              <div className="h-full bg-gold rounded-full" style={{ width: `${Math.min(100, (pots.commonTotal / grandTotal) * 100)}%` }} />
+            </div>
+          )}
+          <div className="space-y-1 text-[12px] text-ink-soft">
+            {pots.transferredFromGroom > 0 && <div>From groom: {formatMoney(pots.transferredFromGroom)}</div>}
+            {pots.transferredFromBride > 0 && <div>From bride: {formatMoney(pots.transferredFromBride)}</div>}
+            {pots.transferredFromGroom === 0 && pots.transferredFromBride === 0 && <div>{pots.lastCommon?.source ?? "—"}</div>}
+          </div>
+        </div>
+      </div>
+
+      {/* Recent entries */}
+      <div className="bg-paper border border-line rounded-[4px] shadow-soft overflow-hidden">
+        <div className="px-6 py-3 border-b border-line bg-cream/40 text-[11px] uppercase tracking-[0.2em] text-ink-soft font-medium">
+          Recent entries
+        </div>
+        <div className="divide-y divide-line">
+          {recentAll.map((s) => (
+            <div
+              key={s.id}
+              className="group flex items-center gap-4 px-6 py-3.5 hover:bg-cream/30 transition-colors cursor-pointer"
+              onClick={() => onEdit(s)}
+            >
+              <div className="text-[18px]">{s.contributor === "groom" ? "👨" : s.contributor === "bride" ? "👰" : "💑"}</div>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-ink text-[13px] truncate">{s.source ?? "Savings"}</div>
+                <div className="text-[11px] text-ink-soft">{formatDate(s.saved_on)}{s.notes && ` · ${s.notes}`}</div>
+              </div>
+              <span className={`text-[9px] uppercase tracking-[0.15em] px-2 py-0.5 rounded-full border shrink-0 ${
+                s.contributor === "groom" ? "border-sage/50 text-sage bg-sage/10" :
+                s.contributor === "bride" ? "border-rose/50 text-rose bg-rose/10" :
+                "border-gold/50 text-gold bg-gold/10"
+              }`}>
+                {s.contributor === "both" ? "Common" : s.contributor}
+              </span>
+              <div className="font-mono text-[13px] text-sage font-medium">+{formatMoney(s.amount)}</div>
+              <button
+                type="button"
+                className="opacity-0 group-hover:opacity-100 transition-opacity text-ink-soft hover:text-burgundy"
+                onClick={(e) => { e.stopPropagation(); onDelete(s); }}
+              >×</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// SavingsDialog — log / edit a savings entry
+// ============================================================================
+
+function SavingsDialog({
+  open, onOpenChange, editing, onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  editing: WeddingSavingsRow | null;
+  onSaved: (row: WeddingSavingsRow) => void;
+}) {
+  const action = editing ? updateSavingEntry.bind(null, editing.id) : createSavingEntry;
+  const [state, formAction, pending] = useActionState<
+    { error?: string; ok?: true; data?: WeddingSavingsRow } | null,
+    FormData
+  >(action, null);
+
+  useEffect(() => {
+    if (state?.ok && state?.data) {
+      onSaved(state.data);
+      onOpenChange(false);
+    }
+  }, [state, onOpenChange, onSaved]);
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const NO_SOURCE = "__none__";
+
+  const CONTRIBUTOR_OPTIONS = [
+    { value: "groom", label: "Groom" },
+    { value: "bride", label: "Bride" },
+    { value: "both", label: "Common fund" },
+  ];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{editing ? <>Edit <em>savings</em></> : <>Log <em>savings</em></>}</DialogTitle>
+          <DialogDescription>Money set aside for the wedding.</DialogDescription>
+        </DialogHeader>
+        <form action={formAction} className="flex flex-col gap-4 mt-2">
+          <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="s-amount">Amount (€)</Label>
+              <Input id="s-amount" name="amount" type="number" min="0" step="1" defaultValue={editing?.amount ?? ""} placeholder="500" required autoFocus />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="s-date">Date</Label>
+              <Input id="s-date" name="saved_on" type="date" defaultValue={editing?.saved_on ?? todayIso} required />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
+            <div className="flex flex-col gap-2">
+              <Label>Source</Label>
+              <SelectField
+                name="source"
+                defaultValue={editing?.source ?? SAVINGS_SOURCES[0]}
+                options={[...SAVINGS_SOURCES.map((s) => ({ value: s, label: s })), { value: NO_SOURCE, label: "— None —" }]}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>Saved by</Label>
+              <SelectField
+                name="contributor"
+                defaultValue={editing?.contributor ?? "groom"}
+                options={CONTRIBUTOR_OPTIONS}
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="s-notes">Notes (optional)</Label>
+            <Input id="s-notes" name="notes" defaultValue={editing?.notes ?? ""} placeholder="Monthly salary transfer…" />
+          </div>
+          {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
+            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================================================
+// TransferDialog — move from personal to common fund
+// ============================================================================
+
+function TransferDialog({
+  open, onOpenChange, onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onSaved: (row: WeddingSavingsRow) => void;
+}) {
+  const [from, setFrom] = useState<"groom" | "bride">("groom");
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const [state, formAction, pending] = useActionState<
+    { error?: string; ok?: true; data?: WeddingSavingsRow } | null,
+    FormData
+  >(createSavingEntry, null);
+
+  useEffect(() => {
+    if (state?.ok && state?.data) {
+      onSaved(state.data);
+      onOpenChange(false);
+    }
+  }, [state, onOpenChange, onSaved]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Transfer to <em>Common fund</em></DialogTitle>
+          <DialogDescription>Move personal savings to the shared wedding fund.</DialogDescription>
+        </DialogHeader>
+        <form action={formAction} className="flex flex-col gap-4 mt-2">
+          <input type="hidden" name="contributor" value="both" />
+          <input type="hidden" name="source" value={`Transfer from ${from === "groom" ? "Groom" : "Bride"}`} />
+
+          <div className="flex flex-col gap-2">
+            <Label>Transfer from</Label>
+            <div className="flex gap-2">
+              {(["groom", "bride"] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setFrom(p)}
+                  className={`flex-1 py-2.5 rounded-[4px] text-[13px] border transition-all ${
+                    from === p
+                      ? p === "groom" ? "bg-sage/10 border-sage text-sage font-medium" : "bg-rose/10 border-rose text-rose font-medium"
+                      : "border-line text-ink-soft hover:border-ink-soft"
+                  }`}
+                >
+                  {p === "groom" ? "👨 Groom" : "👰 Bride"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3.5">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="tr-amount">Amount (€)</Label>
+              <Input id="tr-amount" name="amount" type="number" min="0" step="1" placeholder="5000" required autoFocus />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="tr-date">Date</Label>
+              <Input id="tr-date" name="saved_on" type="date" defaultValue={todayIso} required />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="tr-notes">Notes (optional)</Label>
+            <Input id="tr-notes" name="notes" placeholder="e.g. After the wedding ceremony…" />
+          </div>
+
+          {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
+            <Button type="submit" disabled={pending}>{pending ? "Transferring…" : "Transfer"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================================================
+// ExpandedSavingsDialog — full list with search + filters
+// ============================================================================
+
+function ExpandedSavingsDialog({
+  open, onOpenChange, savings, onEdit, onDelete, onAdd,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  savings: WeddingSavingsRow[];
+  onEdit: (s: WeddingSavingsRow) => void;
+  onDelete: (s: WeddingSavingsRow) => void;
+  onAdd: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [contributorFilter, setContributorFilter] = useState("all");
+  const [sortKey, setSortKey] = useState<"date" | "amount">("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  function toggleSort(key: "date" | "amount") {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir("desc"); }
+  }
+
+  const rows = useMemo(() => {
+    let out = [...savings];
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      out = out.filter((s) => (s.source ?? "").toLowerCase().includes(q) || (s.notes ?? "").toLowerCase().includes(q));
+    }
+    if (contributorFilter !== "all") out = out.filter((s) => s.contributor === contributorFilter);
+    out.sort((a, b) => {
+      const cmp = sortKey === "date" ? a.saved_on.localeCompare(b.saved_on) : a.amount - b.amount;
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return out;
+  }, [savings, search, contributorFilter, sortKey, sortDir]);
+
+  const fs = "h-8 text-[12px] rounded border border-line bg-paper px-2 text-ink focus:outline-none";
+
+  function SortTh({ col, label }: { col: "date" | "amount"; label: string }) {
+    const active = sortKey === col;
+    return (
+      <th className="cursor-pointer select-none hover:text-ink transition-colors" onClick={() => toggleSort(col)}>
+        {label} {active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
+      </th>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[80vw] w-[80vw]">
+        <DialogHeader>
+          <DialogTitle>All <em>savings</em></DialogTitle>
+          <DialogDescription>{savings.length} total · showing {rows.length}</DialogDescription>
+        </DialogHeader>
+        <div className="flex gap-2 flex-wrap items-center">
+          <Input placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8 text-[12px] w-40" />
+          <select value={contributorFilter} onChange={(e) => setContributorFilter(e.target.value)} className={fs}>
+            <option value="all">All contributors</option>
+            <option value="groom">Groom</option>
+            <option value="bride">Bride</option>
+            <option value="both">Common fund</option>
+          </select>
+          <Button size="sm" onClick={onAdd} className="ml-auto text-[12px]">+ Log savings</Button>
+        </div>
+        <div className="overflow-auto max-h-[60vh]">
+          <table className="budget-table w-full">
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Contributor</th>
+                <SortTh col="date" label="Date" />
+                <SortTh col="amount" label="Amount" />
+                <th>Notes</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((s) => (
+                <tr key={s.id} className="cursor-pointer hover:bg-cream/30 transition-colors" onClick={() => { onEdit(s); onOpenChange(false); }}>
+                  <td className="font-medium">{s.source ?? "—"}</td>
+                  <td>
+                    <span className={`text-[10px] uppercase tracking-[0.15em] px-2 py-0.5 rounded-full border ${
+                      s.contributor === "groom" ? "border-sage/50 text-sage bg-sage/10" :
+                      s.contributor === "bride" ? "border-rose/50 text-rose bg-rose/10" :
+                      "border-gold/50 text-gold bg-gold/10"
+                    }`}>
+                      {s.contributor === "both" ? "Common" : s.contributor}
+                    </span>
+                  </td>
+                  <td className="text-ink-soft">{formatDate(s.saved_on)}</td>
+                  <td className="num font-mono text-sage">+{formatMoney(s.amount)}</td>
+                  <td className="text-ink-soft italic text-[12px]">{s.notes ?? "—"}</td>
+                  <td>
+                    <button type="button" className="text-ink-soft hover:text-burgundy text-[18px] transition-colors"
+                      onClick={(e) => { e.stopPropagation(); onDelete(s); }} aria-label="Delete">×</button>
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={6} className="text-center text-ink-soft italic py-8">No entries match your filters.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================================================
+// Settings dialog
+// ============================================================================
 
 function SettingsDialog({
   open, onOpenChange, settings, weddingCashOnHand, onSaved,
