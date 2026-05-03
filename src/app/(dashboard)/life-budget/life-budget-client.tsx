@@ -384,17 +384,18 @@ export function LifeBudgetClient({
           </div>
         </div>
         <CashflowChart projection={projection} purchases={purchases.filter((p) => p.scheduled)} />
-        <div className="grid grid-cols-3 gap-4 mt-5 max-md:grid-cols-1 text-[12px]">
-          <Legend swatch="#7c8a6b" label="Net surplus month" />
-          <Legend swatch="#7a1f2b" label="Net deficit month" />
-          <Legend swatch="#3d2c2e" label="Cumulative cash line" />
+        <div className="grid grid-cols-4 gap-4 mt-5 max-md:grid-cols-2 text-[12px]">
+          <Legend swatch="#7c8a6b" label="Monthly income" />
+          <Legend swatch="#7a1f2b" label="Fixed bills" />
+          <Legend swatch="#c79b3a" label="One-off purchases" />
+          <Legend swatch="#3d2c2e" label="Cumulative cash" />
         </div>
       </div>
 
       {/* Per-person card */}
       <div className="grid grid-cols-2 gap-5 max-md:grid-cols-1 mb-8">
-        <PersonMonthly name="Groom" accent="sage" income={income} expenses={expenses} person="groom" />
-        <PersonMonthly name="Bride" accent="rose" income={income} expenses={expenses} person="bride" />
+        <PersonMonthly name="Groom" accent="sage" income={income} expenses={expenses} purchases={purchases} person="groom" />
+        <PersonMonthly name="Bride" accent="rose" income={income} expenses={expenses} purchases={purchases} person="bride" />
       </div>
 
       {/* Three sections */}
@@ -549,130 +550,298 @@ function CashflowChart({
   projection: ProjectionPoint[];
   purchases: LifePurchaseRow[];
 }) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
   if (projection.length === 0) {
     return <p className="text-[13px] italic text-ink-soft text-center py-12">Adjust settings to see the projection.</p>;
   }
 
   const width = 920;
-  const height = 280;
-  const padTop = 20;
-  const padBottom = 36;
-  const padLeft = 56;
-  const padRight = 16;
+  const height = 340;
+  const padTop = 28;
+  const padBottom = 42;
+  const padLeft = 68;
+  const padRight = 20;
   const innerW = width - padLeft - padRight;
   const innerH = height - padTop - padBottom;
 
+  // Cumulative Y scale
   const cumValues = projection.map((p) => p.cumulative);
-  const minCum = Math.min(0, ...cumValues);
-  const maxCum = Math.max(0, ...cumValues);
-  const range = maxCum - minCum || 1;
+  const rawMin = Math.min(0, ...cumValues);
+  const rawMax = Math.max(0, ...cumValues);
+  const cushion = (rawMax - rawMin) * 0.08 || 500;
+  const yMin = rawMin - cushion;
+  const yMax = rawMax + cushion;
+  const range = yMax - yMin || 1;
 
-  const yFor = (v: number) => padTop + ((maxCum - v) / range) * innerH;
+  const yFor = (v: number) => padTop + ((yMax - v) / range) * innerH;
   const zeroY = yFor(0);
 
-  const stepX = innerW / Math.max(1, projection.length - 1);
-  const xFor = (i: number) => padLeft + i * stepX;
+  // Bar scale: normalised to 28% of chart height so bars are always visible
+  const maxFlow = Math.max(...projection.map((p) => Math.max(p.income, p.fixed + p.purchases)), 1);
+  const barH = (v: number) => Math.max(1, (v / maxFlow) * innerH * 0.28);
 
-  // Bar width capped to keep things readable on long horizons.
-  const barW = Math.min(stepX * 0.6, 18);
+  const stepX = innerW / Math.max(1, projection.length);
+  const xFor = (i: number) => padLeft + (i + 0.5) * stepX;
+  const barW = Math.min(stepX * 0.28, 10);
 
-  // Cumulative line path
-  const linePath = projection
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${xFor(i)} ${yFor(p.cumulative)}`)
-    .join(" ");
-
-  // Filled area under the cumulative line (subtle).
+  // Cumulative path
+  const linePath = projection.map((p, i) => `${i === 0 ? "M" : "L"} ${xFor(i)} ${yFor(p.cumulative)}`).join(" ");
   const areaPath = `${linePath} L ${xFor(projection.length - 1)} ${zeroY} L ${xFor(0)} ${zeroY} Z`;
 
-  // Index purchases by month for marker rendering.
-  const purchasesByMonth = new Map<string, number>();
-  for (const p of purchases) {
-    purchasesByMonth.set(p.target_month, (purchasesByMonth.get(p.target_month) ?? 0) + Number(p.amount));
+  // Gradient split at zero
+  const zeroFrac = Math.max(0.001, Math.min(0.999, (zeroY - padTop) / innerH));
+
+  // Find break-even crossing
+  let breakEvenIdx: number | null = null;
+  let dipped = false;
+  for (let i = 0; i < projection.length; i++) {
+    if (projection[i].cumulative < 0) dipped = true;
+    else if (dipped && projection[i].cumulative >= 0) { breakEvenIdx = i; break; }
   }
 
-  // Y-axis ticks (5 evenly spaced)
-  const ticks = 5;
+  // Y-axis ticks
   const tickValues: number[] = [];
-  for (let i = 0; i <= ticks; i++) {
-    tickValues.push(minCum + (range * i) / ticks);
-  }
+  for (let i = 0; i <= 6; i++) tickValues.push(yMin + (range * i) / 6);
 
-  // X-axis: show every Nth month label so they don't overlap
-  const labelEvery = Math.max(1, Math.ceil(projection.length / 12));
+  const labelEvery = Math.max(1, Math.ceil(projection.length / 14));
 
   return (
-    <div className="overflow-x-auto">
-      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="min-w-[640px]">
-        {/* Y grid lines + labels */}
+    <div className="relative overflow-x-auto select-none">
+      {/* Hover tooltip */}
+      {hoveredIdx !== null && (() => {
+        const p = projection[hoveredIdx];
+        const cx = xFor(hoveredIdx);
+        const relX = cx - padLeft;
+        const flipLeft = relX > innerW * 0.62;
+        return (
+          <div
+            className="absolute top-6 pointer-events-none z-10 bg-ink/95 text-cream text-[11px] rounded-[6px] px-3.5 py-2.5 shadow-xl min-w-[170px] backdrop-blur-sm"
+            style={{ left: Math.max(0, flipLeft ? cx - 182 : cx - padLeft + 14) }}
+          >
+            <div className="font-serif text-[13px] mb-2 border-b border-cream/15 pb-1.5">{monthLabel(p.month)}</div>
+            <div className="space-y-1">
+              <div className="flex justify-between gap-6">
+                <span className="text-cream/50">Income</span>
+                <span className="text-[#a8c49a] font-mono">+{formatMoney(p.income)}</span>
+              </div>
+              <div className="flex justify-between gap-6">
+                <span className="text-cream/50">Bills</span>
+                <span className="text-[#c47a7a] font-mono">−{formatMoney(p.fixed)}</span>
+              </div>
+              {p.purchases > 0 && (
+                <div className="flex justify-between gap-6">
+                  <span className="text-cream/50">Purchases</span>
+                  <span className="text-[#e0ba6a] font-mono">−{formatMoney(p.purchases)}</span>
+                </div>
+              )}
+              <div className="flex justify-between gap-6 pt-1 mt-1 border-t border-cream/15">
+                <span className="text-cream/50">Net</span>
+                <span className={`font-mono font-semibold ${p.net >= 0 ? "text-[#a8c49a]" : "text-[#c47a7a]"}`}>
+                  {p.net >= 0 ? "+" : ""}{formatMoney(p.net)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-6">
+                <span className="text-cream/50">Cash</span>
+                <span className={`font-mono font-semibold ${p.cumulative >= 0 ? "text-[#a8c49a]" : "text-[#c47a7a]"}`}>
+                  {formatMoney(p.cumulative)}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      <svg
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        className="min-w-[640px] cursor-crosshair"
+        onMouseMove={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const svgX = (e.clientX - rect.left) * (width / rect.width);
+          const idx = Math.floor((svgX - padLeft) / stepX);
+          setHoveredIdx(idx >= 0 && idx < projection.length ? idx : null);
+        }}
+        onMouseLeave={() => setHoveredIdx(null)}
+      >
+        <defs>
+          {/* Gradient for cumulative area: green above zero, red below */}
+          <linearGradient id="areaGrad" x1="0" y1={padTop} x2="0" y2={padTop + innerH} gradientUnits="userSpaceOnUse">
+            <stop offset="0" stopColor="#7c8a6b" stopOpacity="0.45" />
+            <stop offset={zeroFrac * 0.88} stopColor="#7c8a6b" stopOpacity="0.12" />
+            <stop offset={zeroFrac} stopColor="#7a1f2b" stopOpacity="0.12" />
+            <stop offset="1" stopColor="#7a1f2b" stopOpacity="0.45" />
+          </linearGradient>
+          {/* Income bar gradient (top = solid, bottom = transparent) */}
+          <linearGradient id="incGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#7c8a6b" stopOpacity="0.9" />
+            <stop offset="1" stopColor="#7c8a6b" stopOpacity="0.35" />
+          </linearGradient>
+          {/* Expense bar gradient */}
+          <linearGradient id="expGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#7a1f2b" stopOpacity="0.35" />
+            <stop offset="1" stopColor="#7a1f2b" stopOpacity="0.9" />
+          </linearGradient>
+        </defs>
+
+        {/* Chart area background */}
+        <rect x={padLeft} y={padTop} width={innerW} height={innerH} fill="#faf5e9" opacity="0.5" rx={3} />
+
+        {/* Grid lines */}
         {tickValues.map((v, i) => {
           const y = yFor(v);
+          if (y < padTop - 2 || y > padTop + innerH + 2) return null;
+          const isZero = Math.abs(v) < range * 0.001;
           return (
-            <g key={i}>
-              <line x1={padLeft} x2={width - padRight} y1={y} y2={y} stroke="#e6dccd" strokeWidth={1} />
-              <text x={padLeft - 6} y={y + 3} textAnchor="end" fontSize={9} fill="#7a6f60" fontFamily="monospace">
-                {formatMoneyShort(v)}
+            <line key={i}
+              x1={padLeft} x2={width - padRight} y1={y} y2={y}
+              stroke={isZero ? "#3d2c2e" : "#e6dccd"}
+              strokeWidth={isZero ? 1.5 : 0.8}
+              strokeDasharray={isZero ? "5 4" : undefined}
+              opacity={isZero ? 0.6 : 1}
+            />
+          );
+        })}
+
+        {/* Y-axis labels */}
+        {tickValues.map((v, i) => {
+          const y = yFor(v);
+          if (y < padTop - 6 || y > padTop + innerH + 6) return null;
+          return (
+            <text key={i} x={padLeft - 10} y={y + 3.5} textAnchor="end" fontSize={10} fill="#7a6f60" fontFamily="monospace">
+              {formatMoneyShort(v)}
+            </text>
+          );
+        })}
+
+        {/* Hover column highlight */}
+        {hoveredIdx !== null && (
+          <rect
+            x={padLeft + hoveredIdx * stepX}
+            y={padTop}
+            width={stepX}
+            height={innerH}
+            fill="#3d2c2e"
+            opacity={0.045}
+          />
+        )}
+
+        {/* Income bars — going UP from zero axis */}
+        {projection.map((p, i) => {
+          const cx = xFor(i);
+          const h = barH(p.income);
+          return (
+            <rect key={"inc-" + p.month}
+              x={cx - barW - 1}
+              y={zeroY - h}
+              width={barW}
+              height={h}
+              fill="url(#incGrad)"
+              opacity={hoveredIdx === i ? 1 : 0.7}
+              rx={1.5}
+            />
+          );
+        })}
+
+        {/* Expense bars — going DOWN from zero axis (fixed + purchases stacked) */}
+        {projection.map((p, i) => {
+          const cx = xFor(i);
+          const fixH = barH(p.fixed);
+          const purH = p.purchases > 0 ? barH(p.purchases) : 0;
+          return (
+            <g key={"exp-" + p.month}>
+              <rect
+                x={cx + 1}
+                y={zeroY}
+                width={barW}
+                height={fixH}
+                fill="url(#expGrad)"
+                opacity={hoveredIdx === i ? 0.95 : 0.65}
+                rx={1.5}
+              />
+              {purH > 0 && (
+                <rect
+                  x={cx + 1}
+                  y={zeroY + fixH}
+                  width={barW}
+                  height={purH}
+                  fill="#c79b3a"
+                  opacity={hoveredIdx === i ? 1 : 0.75}
+                  rx={1.5}
+                />
+              )}
+            </g>
+          );
+        })}
+
+        {/* Cumulative area fill */}
+        <path d={areaPath} fill="url(#areaGrad)" />
+
+        {/* Cumulative line */}
+        <path d={linePath} fill="none" stroke="#3d2c2e" strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />
+
+        {/* Cumulative dots — colored by positive/negative */}
+        {projection.map((p, i) => (
+          <circle key={"cd-" + p.month}
+            cx={xFor(i)}
+            cy={yFor(p.cumulative)}
+            r={hoveredIdx === i ? 4.5 : 2.5}
+            fill={p.cumulative >= 0 ? "#7c8a6b" : "#7a1f2b"}
+            stroke="#faf5e9"
+            strokeWidth={hoveredIdx === i ? 1.5 : 1}
+          />
+        ))}
+
+        {/* Break-even marker */}
+        {breakEvenIdx !== null && (() => {
+          const p = projection[breakEvenIdx];
+          const cx = xFor(breakEvenIdx);
+          const cy = yFor(p.cumulative);
+          const labelRight = cx < padLeft + innerW * 0.75;
+          return (
+            <g>
+              <line x1={cx} x2={cx} y1={padTop} y2={cy - 12} stroke="#c79b3a" strokeWidth={1} strokeDasharray="4 3" opacity={0.55} />
+              <circle cx={cx} cy={cy} r={8} fill="#c79b3a" opacity={0.9} />
+              <circle cx={cx} cy={cy} r={4} fill="#faf5e9" opacity={0.8} />
+              <text
+                x={labelRight ? cx + 12 : cx - 12}
+                y={cy - 10}
+                textAnchor={labelRight ? "start" : "end"}
+                fontSize={9.5}
+                fill="#c79b3a"
+                fontFamily="ui-sans-serif"
+                fontWeight="700"
+                letterSpacing="0.08em"
+              >
+                BREAK EVEN
               </text>
             </g>
           );
-        })}
+        })()}
 
-        {/* Zero line — emphasized */}
-        <line x1={padLeft} x2={width - padRight} y1={zeroY} y2={zeroY} stroke="#3d2c2e" strokeWidth={1.2} strokeDasharray="3 3" />
-
-        {/* Net bars */}
-        {projection.map((p, i) => {
-          const cx = xFor(i);
-          const netHeight = Math.abs((p.net / range) * innerH);
-          const y = p.net >= 0 ? zeroY - netHeight : zeroY;
-          const fill = p.net >= 0 ? "#7c8a6b" : "#7a1f2b";
-          return (
-            <rect
-              key={p.month}
-              x={cx - barW / 2}
-              y={y}
-              width={barW}
-              height={Math.max(1, netHeight)}
-              fill={fill}
-              opacity={0.55}
-              rx={1.5}
-            >
-              <title>{`${monthLabel(p.month)}\nIncome: ${formatMoney(p.income)}\nFixed: ${formatMoney(p.fixed)}\nPurchases: ${formatMoney(p.purchases)}\nNet: ${formatMoney(p.net)}\nCumulative: ${formatMoney(p.cumulative)}`}</title>
-            </rect>
-          );
-        })}
-
-        {/* Purchase markers — small dots above zero line */}
-        {projection.map((p, i) => {
-          const total = purchasesByMonth.get(p.month) ?? 0;
-          if (total === 0) return null;
-          return (
-            <g key={"pm-" + p.month}>
-              <circle cx={xFor(i)} cy={padTop + 4} r={3.5} fill="#c79b3a">
-                <title>{`Purchase in ${monthLabel(p.month)}: ${formatMoney(total)}`}</title>
-              </circle>
-            </g>
-          );
-        })}
-
-        {/* Cumulative area + line on top */}
-        <path d={areaPath} fill="#3d2c2e" opacity={0.06} />
-        <path d={linePath} fill="none" stroke="#3d2c2e" strokeWidth={1.8} />
-        {projection.map((p, i) => (
-          <circle key={"cd-" + p.month} cx={xFor(i)} cy={yFor(p.cumulative)} r={2} fill="#3d2c2e" />
-        ))}
+        {/* Hover vertical crosshair */}
+        {hoveredIdx !== null && (
+          <line
+            x1={xFor(hoveredIdx)} x2={xFor(hoveredIdx)}
+            y1={padTop} y2={padTop + innerH}
+            stroke="#3d2c2e" strokeWidth={1} strokeDasharray="5 4" opacity={0.25}
+          />
+        )}
 
         {/* X-axis labels */}
         {projection.map((p, i) => {
           if (i % labelEvery !== 0 && i !== projection.length - 1) return null;
+          const active = hoveredIdx === i;
           return (
-            <text
-              key={"xl-" + p.month}
+            <text key={"xl-" + p.month}
               x={xFor(i)}
-              y={height - 10}
+              y={height - 14}
               textAnchor="middle"
-              fontSize={9}
-              fill="#7a6f60"
+              fontSize={active ? 10 : 9.5}
+              fill={active ? "#3d2c2e" : "#7a6f60"}
               fontFamily="ui-sans-serif"
+              fontWeight={active ? "700" : "400"}
             >
               {monthShort(p.month)}
             </text>
@@ -727,12 +896,13 @@ function Legend({ swatch, label }: { swatch: string; label: string }) {
 }
 
 function PersonMonthly({
-  name, accent, income, expenses, person,
+  name, accent, income, expenses, purchases, person,
 }: {
   name: string;
   accent: "sage" | "rose";
   income: LifeIncomeRow[];
   expenses: LifeExpenseRow[];
+  purchases: LifePurchaseRow[];
   person: "groom" | "bride";
 }) {
   const todayMonth = dateToMonth(new Date());
@@ -746,16 +916,24 @@ function PersonMonthly({
     const personExpenses = expenses
       .filter((e) => isActiveInMonth(e.start_month, e.end_month, m))
       .reduce((a, e) => a + Number(e.amount) * personShare(e.payer, e.payer_groom_pct, person), 0);
-    return { income: personIncome, expenses: personExpenses, net: personIncome - personExpenses };
-  }, [income, expenses, person, selectedMonth]);
+    const personPurchases = purchases
+      .filter((p) => p.scheduled && p.target_month === m)
+      .reduce((a, p) => a + Number(p.amount) * personShare(p.payer, p.payer_groom_pct, person), 0);
+    return {
+      income: personIncome,
+      expenses: personExpenses,
+      purchases: personPurchases,
+      net: personIncome - personExpenses - personPurchases,
+    };
+  }, [income, expenses, purchases, person, selectedMonth]);
 
   const accentBorder = accent === "sage" ? "border-l-sage" : "border-l-rose";
   const accentText = accent === "sage" ? "text-sage" : "text-rose";
-  const noData = stats.income === 0 && stats.expenses === 0;
+  const noData = stats.income === 0 && stats.expenses === 0 && stats.purchases === 0;
 
   return (
     <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] p-5 shadow-soft`}>
-      <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div className={`text-[11px] uppercase tracking-[0.3em] font-medium ${accentText}`}>{name} · monthly</div>
         <div className="w-44 shrink-0">
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
@@ -773,22 +951,42 @@ function PersonMonthly({
       {noData ? (
         <p className="text-[13px] italic text-ink-soft">Tag income or expenses to this person.</p>
       ) : (
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Income</div>
-            <div className="font-mono text-sage text-[15px]">+{formatMoney(stats.income)}</div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Share of bills</div>
-            <div className="font-mono text-burgundy text-[15px]">−{formatMoney(stats.expenses)}</div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Net</div>
-            <div className={`font-mono text-[15px] ${stats.net >= 0 ? accentText : "text-burgundy"}`}>
-              {stats.net >= 0 ? "+" : ""}{formatMoney(stats.net)}
+        <>
+          <div className={`grid gap-3 ${stats.purchases > 0 ? "grid-cols-4" : "grid-cols-3"}`}>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Income</div>
+              <div className="font-mono text-sage text-[15px]">+{formatMoney(stats.income)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Bills</div>
+              <div className="font-mono text-burgundy text-[15px]">−{formatMoney(stats.expenses)}</div>
+            </div>
+            {stats.purchases > 0 && (
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Purchases</div>
+                <div className="font-mono text-gold text-[15px]">−{formatMoney(stats.purchases)}</div>
+              </div>
+            )}
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Net</div>
+              <div className={`font-mono text-[15px] ${stats.net >= 0 ? accentText : "text-burgundy"}`}>
+                {stats.net >= 0 ? "+" : ""}{formatMoney(stats.net)}
+              </div>
             </div>
           </div>
-        </div>
+          {/* Mini bar showing income vs outgoings */}
+          {stats.income > 0 && (() => {
+            const total = Math.max(stats.income, stats.expenses + stats.purchases);
+            const incPct = Math.round((stats.income / total) * 100);
+            const expPct = Math.round(((stats.expenses + stats.purchases) / total) * 100);
+            return (
+              <div className="mt-3 flex gap-0.5 h-1.5 rounded-full overflow-hidden">
+                <div className="bg-sage rounded-l-full transition-all" style={{ width: `${incPct}%` }} />
+                <div className="bg-burgundy rounded-r-full transition-all" style={{ width: `${expPct}%` }} />
+              </div>
+            );
+          })()}
+        </>
       )}
     </div>
   );
@@ -1223,8 +1421,8 @@ function PurchaseDialog({
             </div>
           </div>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="target_month">Target month</Label>
-            <Input id="target_month" name="target_month" type="month" defaultValue={editing?.target_month ?? defaultMonth} required />
+            <Label>Target month</Label>
+            <MonthSelect name="target_month" defaultValue={editing?.target_month ?? defaultMonth} required />
           </div>
           <div className={`grid gap-3.5 max-md:grid-cols-1 ${payer === "both" ? "grid-cols-2" : "grid-cols-1"}`}>
             <div className="flex flex-col gap-2">
