@@ -169,6 +169,7 @@ export interface LifePurchaseRow {
   id: string;
   name: string;
   amount: number;
+  already_paid: number;
   category: string | null;
   target_month: string;
   payer: LifePerson;
@@ -506,6 +507,7 @@ export type Database = {
           id?: string;
           name: string;
           amount: number;
+          already_paid?: number;
           category?: string | null;
           target_month: string;
           payer?: LifePerson;
@@ -519,6 +521,7 @@ export type Database = {
           id?: string;
           name?: string;
           amount?: number;
+          already_paid?: number;
           category?: string | null;
           target_month?: string;
           payer?: LifePerson;
