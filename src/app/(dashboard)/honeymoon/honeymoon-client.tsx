@@ -202,6 +202,10 @@ function HoneymoonDialog({
   const handleFormSubmit = (formData: FormData) => {
     const imagesInput = document.getElementById("images") as HTMLInputElement;
     const files = imagesInput?.files ? Array.from(imagesInput.files) : [];
+
+    // Remove images field from formData if it exists (it shouldn't be sent to server action)
+    formData.delete("images");
+
     setPendingImages(files);
     formAction(formData);
   };
@@ -286,7 +290,7 @@ function HoneymoonDialog({
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="images">Add images</Label>
-            <Input id="images" name="images" type="file" multiple accept="image/*" />
+            <input id="images" type="file" multiple accept="image/*" className="block w-full text-sm text-ink-soft file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-cream-deep file:text-ink hover:file:bg-cream" />
             <p className="text-xs text-ink-soft">Upload one or more images for this destination</p>
           </div>
 
