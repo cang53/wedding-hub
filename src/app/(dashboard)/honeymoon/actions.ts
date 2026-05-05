@@ -2,6 +2,7 @@
 
 import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
 import type { HoneymoonRow } from "@/types/db";
+import { v4 as uuid } from "uuid";
 
 function parseInput(form: FormData) {
   const name = String(form.get("name") ?? "").trim();
@@ -46,4 +47,96 @@ export async function toggleFavorite(id: string, favorite: boolean) {
 export async function deleteDestination(id: string) {
   const supabase = createSupabaseServerClient();
   await supabase.from("honeymoon").delete().eq("id", id);
+}
+
+export async function uploadHoneymoonImages(destinationId: string, formData: FormData) {
+  const supabase = createSupabaseServerClient();
+  const files = formData.getAll("images") as File[];
+
+  if (!files || files.length === 0) {
+    return { error: "No files selected" };
+  }
+
+  const uploadedUrls: string[] = [];
+
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) {
+      continue; // Skip non-image files
+    }
+
+    const fileName = `${destinationId}/${uuid()}-${file.name}`;
+    const { data, error } = await supabase.storage
+      .from("honeymoon-images")
+      .upload(fileName, file);
+
+    if (error) {
+      console.error("Upload error:", error);
+      continue;
+    }
+
+    if (data) {
+      const { data: urlData } = supabase.storage
+        .from("honeymoon-images")
+        .getPublicUrl(fileName);
+      if (urlData) {
+        uploadedUrls.push(urlData.publicUrl);
+      }
+    }
+  }
+
+  if (uploadedUrls.length === 0) {
+    return { error: "No images uploaded" };
+  }
+
+  // Get current images from the destination
+  const { data: current } = await supabase
+    .from("honeymoon")
+    .select("images")
+    .eq("id", destinationId)
+    .single();
+
+  const currentImages = current?.images ? JSON.parse(current.images) : [];
+  const allImages = [...currentImages, ...uploadedUrls];
+
+  // Update destination with new images
+  const { data, error: updateError } = await supabase
+    .from("honeymoon")
+    .update({ images: JSON.stringify(allImages) })
+    .eq("id", destinationId)
+    .select()
+    .single();
+
+  if (updateError) {
+    return { error: updateError.message };
+  }
+
+  return { ok: true as const, data: data as HoneymoonRow };
+}
+
+export async function deleteHoneymoonImage(destinationId: string, imageUrl: string) {
+  const supabase = createSupabaseServerClient();
+
+  // Get current images
+  const { data: current } = await supabase
+    .from("honeymoon")
+    .select("images")
+    .eq("id", destinationId)
+    .single();
+
+  const currentImages = current?.images ? JSON.parse(current.images) : [];
+  const updatedImages = currentImages.filter((url: string) => url !== imageUrl);
+
+  // Update destination
+  const { data, error } = await supabase
+    .from("honeymoon")
+    .update({ images: updatedImages.length > 0 ? JSON.stringify(updatedImages) : null })
+    .eq("id", destinationId)
+    .select()
+    .single();
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return { ok: true as const, data: data as HoneymoonRow };
 }

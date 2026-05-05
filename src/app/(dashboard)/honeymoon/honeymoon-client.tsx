@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { createDestination, deleteDestination, toggleFavorite, updateDestination } from "./actions";
+import { createDestination, deleteDestination, toggleFavorite, updateDestination, uploadHoneymoonImages, deleteHoneymoonImage } from "./actions";
 
 interface Props {
   initialItems: HoneymoonRow[];
@@ -115,6 +115,36 @@ export function HoneymoonClient({ initialItems }: Props) {
                   </div>
                 )}
               </div>
+              {d.images && (() => {
+                const images = JSON.parse(d.images) as string[];
+                return images.length > 0 && (
+                  <div className="gallery">
+                    {images.map((url, i) => (
+                      <div key={i} className="gallery-item">
+                        <img src={url} alt="destination" />
+                        <button
+                          type="button"
+                          className="delete-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm("Delete this image?")) {
+                              startTransition(() => {
+                                deleteHoneymoonImage(d.id, url).then((result) => {
+                                  if (result.ok && result.data) {
+                                    setItems((prev) => prev.map((i) => (i.id === result.data!.id ? result.data! : i)));
+                                  }
+                                });
+                              });
+                            }
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
               {d.notes && <div className="notes">{d.notes}</div>}
               <div className="actions">
                 {d.link && (
@@ -133,6 +163,7 @@ export function HoneymoonClient({ initialItems }: Props) {
         open={dialogOpen}
         onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditing(null); }}
         editing={editing}
+        setEditing={setEditing}
         onSaved={(item) => {
           setItems((prev) => {
             const exists = prev.some((i) => i.id === item.id);
@@ -155,22 +186,47 @@ function EmptyState() {
 }
 
 function HoneymoonDialog({
-  open, onOpenChange, editing, onSaved,
+  open, onOpenChange, editing, setEditing, onSaved,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   editing: HoneymoonRow | null;
+  setEditing: (item: HoneymoonRow | null) => void;
   onSaved: (item: HoneymoonRow) => void;
 }) {
+  const [, startTransition] = useTransition();
   const action = editing ? updateDestination.bind(null, editing.id) : createDestination;
   const [state, formAction, pending] = useActionState<{ error?: string; ok?: true; data?: HoneymoonRow } | null, FormData>(action, null);
+  const [pendingImages, setPendingImages] = useState<File[]>([]);
+
+  const handleFormSubmit = (formData: FormData) => {
+    const imagesInput = document.getElementById("images") as HTMLInputElement;
+    const files = imagesInput?.files ? Array.from(imagesInput.files) : [];
+    setPendingImages(files);
+    formAction(formData);
+  };
 
   useEffect(() => {
     if (state?.ok && state?.data) {
-      onSaved(state.data);
-      onOpenChange(false);
+      if (pendingImages.length > 0) {
+        const uploadFormData = new FormData();
+        pendingImages.forEach(file => uploadFormData.append("images", file));
+
+        startTransition(() => {
+          uploadHoneymoonImages(state.data!.id, uploadFormData).then((result) => {
+            if (result.ok && result.data) {
+              onSaved(result.data);
+              onOpenChange(false);
+              setPendingImages([]);
+            }
+          });
+        });
+      } else {
+        onSaved(state.data);
+        onOpenChange(false);
+      }
     }
-  }, [state, onOpenChange, onSaved]);
+  }, [state?.ok && state?.data ? state.data.id : null, onOpenChange, onSaved]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -180,7 +236,7 @@ function HoneymoonDialog({
           <DialogDescription>Where could we go?</DialogDescription>
         </DialogHeader>
 
-        <form action={formAction} className="flex flex-col gap-4 mt-2">
+        <form action={handleFormSubmit} className="flex flex-col gap-4 mt-2">
           <div className="flex flex-col gap-2">
             <Label htmlFor="name">Place name</Label>
             <Input id="name" name="name" defaultValue={editing?.name ?? ""} placeholder="e.g. Punta Cana" required autoFocus />
@@ -228,11 +284,51 @@ function HoneymoonDialog({
             <Input id="link" name="link" type="url" defaultValue={editing?.link ?? ""} placeholder="https://…" />
           </div>
 
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="images">Add images</Label>
+            <Input id="images" name="images" type="file" multiple accept="image/*" />
+            <p className="text-xs text-ink-soft">Upload one or more images for this destination</p>
+          </div>
+
+          {editing && editing.images && (() => {
+            const currentImages = JSON.parse(editing.images) as string[];
+            return currentImages.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-medium">Current images</p>
+                <div className="gallery">
+                  {currentImages.map((url, i) => (
+                    <div key={i} className="gallery-item">
+                      <img src={url} alt="destination" />
+                      <button
+                        type="button"
+                        className="delete-btn"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (confirm("Delete this image?")) {
+                            startTransition(() => {
+                              deleteHoneymoonImage(editing.id, url).then((result) => {
+                                if (result.ok && result.data) {
+                                  setEditing(result.data);
+                                }
+                              });
+                            });
+                          }
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
+            <Button type="submit" disabled={pending}>{pending ? "Saving…" : pendingImages.length > 0 ? "Save & Upload" : "Save"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
