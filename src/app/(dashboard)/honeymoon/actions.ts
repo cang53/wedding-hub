@@ -53,8 +53,10 @@ export async function uploadHoneymoonImages(destinationId: string, formData: For
   const supabase = createSupabaseServerClient();
   const files = formData.getAll("images") as File[];
 
+  // If no files, just return the current destination
   if (!files || files.length === 0) {
-    return { error: "No files selected" };
+    const { data } = await supabase.from("honeymoon").select("*").eq("id", destinationId).single();
+    return { ok: true as const, data: data as HoneymoonRow };
   }
 
   const uploadedUrls: string[] = [];
@@ -84,8 +86,10 @@ export async function uploadHoneymoonImages(destinationId: string, formData: For
     }
   }
 
+  // If no images uploaded, just return current destination
   if (uploadedUrls.length === 0) {
-    return { error: "No images uploaded" };
+    const { data } = await supabase.from("honeymoon").select("*").eq("id", destinationId).single();
+    return { ok: true as const, data: data as HoneymoonRow };
   }
 
   // Get current images from the destination

@@ -291,8 +291,9 @@ function HoneymoonDialog({
           </div>
 
           {editing && editing.images && (() => {
-            const currentImages = JSON.parse(editing.images) as string[];
-            return currentImages.length > 0 && (
+            try {
+              const currentImages = JSON.parse(editing.images) as string[];
+              return currentImages.length > 0 && (
               <div className="flex flex-col gap-2">
                 <p className="text-sm font-medium">Current images</p>
                 <div className="gallery">
@@ -321,7 +322,10 @@ function HoneymoonDialog({
                   ))}
                 </div>
               </div>
-            );
+              );
+            } catch (e) {
+              return null;
+            }
           })()}
 
           {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
