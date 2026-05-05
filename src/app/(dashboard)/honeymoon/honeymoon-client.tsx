@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState, useTransition } from "react";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { HoneymoonRow } from "@/types/db";
 import { formatMoney } from "@/lib/utils";
@@ -197,36 +197,39 @@ function HoneymoonDialog({
   const [, startTransition] = useTransition();
   const action = editing ? updateDestination.bind(null, editing.id) : createDestination;
   const [state, formAction, pending] = useActionState<{ error?: string; ok?: true; data?: HoneymoonRow } | null, FormData>(action, null);
-  const [pendingImages, setPendingImages] = useState<File[]>([]);
+  const pendingImagesRef = useRef<File[]>([]);
+  const handledStateRef = useRef<string | null>(null);
 
   const handleFormSubmit = (formData: FormData) => {
     const imagesInput = document.getElementById("images") as HTMLInputElement;
-    const files = imagesInput?.files ? Array.from(imagesInput.files) : [];
-    setPendingImages(files);
+    pendingImagesRef.current = imagesInput?.files ? Array.from(imagesInput.files) : [];
+    handledStateRef.current = null;
     formAction(formData);
   };
 
   useEffect(() => {
     if (!state?.ok || !state?.data) return;
+    if (handledStateRef.current === state.data.id) return;
+    handledStateRef.current = state.data.id;
 
-    if (pendingImages.length > 0) {
+    const files = pendingImagesRef.current;
+
+    if (files.length > 0) {
       const uploadFormData = new FormData();
-      pendingImages.forEach(file => uploadFormData.append("images", file));
+      files.forEach(file => uploadFormData.append("images", file));
+      pendingImagesRef.current = [];
 
       startTransition(() => {
         uploadHoneymoonImages(state.data!.id, uploadFormData).then((result) => {
-          if (result.ok && result.data) {
-            onSaved(result.data);
-            onOpenChange(false);
-            setPendingImages([]);
-          }
+          onSaved(result.ok && result.data ? result.data : state.data!);
+          onOpenChange(false);
         });
       });
     } else {
       onSaved(state.data);
       onOpenChange(false);
     }
-  }, [state?.ok, state?.data?.id, pendingImages.length, onOpenChange, onSaved]);
+  }, [state?.ok, state?.data?.id]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -332,7 +335,7 @@ function HoneymoonDialog({
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Saving…" : pendingImages.length > 0 ? "Save & Upload" : "Save"}</Button>
+            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
