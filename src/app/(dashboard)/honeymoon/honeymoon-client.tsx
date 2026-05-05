@@ -202,35 +202,31 @@ function HoneymoonDialog({
   const handleFormSubmit = (formData: FormData) => {
     const imagesInput = document.getElementById("images") as HTMLInputElement;
     const files = imagesInput?.files ? Array.from(imagesInput.files) : [];
-
-    // Remove images field from formData if it exists (it shouldn't be sent to server action)
-    formData.delete("images");
-
     setPendingImages(files);
     formAction(formData);
   };
 
   useEffect(() => {
-    if (state?.ok && state?.data) {
-      if (pendingImages.length > 0) {
-        const uploadFormData = new FormData();
-        pendingImages.forEach(file => uploadFormData.append("images", file));
+    if (!state?.ok || !state?.data) return;
 
-        startTransition(() => {
-          uploadHoneymoonImages(state.data!.id, uploadFormData).then((result) => {
-            if (result.ok && result.data) {
-              onSaved(result.data);
-              onOpenChange(false);
-              setPendingImages([]);
-            }
-          });
+    if (pendingImages.length > 0) {
+      const uploadFormData = new FormData();
+      pendingImages.forEach(file => uploadFormData.append("images", file));
+
+      startTransition(() => {
+        uploadHoneymoonImages(state.data!.id, uploadFormData).then((result) => {
+          if (result.ok && result.data) {
+            onSaved(result.data);
+            onOpenChange(false);
+            setPendingImages([]);
+          }
         });
-      } else {
-        onSaved(state.data);
-        onOpenChange(false);
-      }
+      });
+    } else {
+      onSaved(state.data);
+      onOpenChange(false);
     }
-  }, [state?.ok && state?.data ? state.data.id : null, onOpenChange, onSaved]);
+  }, [state?.ok, state?.data?.id, pendingImages.length, onOpenChange, onSaved]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
