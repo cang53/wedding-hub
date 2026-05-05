@@ -108,6 +108,12 @@ export function HoneymoonClient({ initialItems }: Props) {
                     <span className="v">{d.best_time}</span>
                   </div>
                 )}
+                {d.start_date && (
+                  <div className="stat-mini">
+                    <span className="k">Trip dates</span>
+                    <span className="v">{new Date(d.start_date).toLocaleDateString("en-GB", { month: "short", day: "numeric" })} {d.end_date ? `- ${new Date(d.end_date).toLocaleDateString("en-GB", { month: "short", day: "numeric", year: "numeric" })}` : ""}</span>
+                  </div>
+                )}
               </div>
               {d.notes && <div className="notes">{d.notes}</div>}
               <div className="actions">
@@ -127,6 +133,12 @@ export function HoneymoonClient({ initialItems }: Props) {
         open={dialogOpen}
         onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditing(null); }}
         editing={editing}
+        onSaved={(item) => {
+          setItems((prev) => {
+            const exists = prev.some((i) => i.id === item.id);
+            return exists ? prev.map((i) => (i.id === item.id ? item : i)) : [item, ...prev];
+          });
+        }}
       />
     </section>
   );
@@ -143,16 +155,22 @@ function EmptyState() {
 }
 
 function HoneymoonDialog({
-  open, onOpenChange, editing,
+  open, onOpenChange, editing, onSaved,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   editing: HoneymoonRow | null;
+  onSaved: (item: HoneymoonRow) => void;
 }) {
   const action = editing ? updateDestination.bind(null, editing.id) : createDestination;
-  const [state, formAction, pending] = useActionState<{ error?: string; ok?: true } | null, FormData>(action, null);
+  const [state, formAction, pending] = useActionState<{ error?: string; ok?: true; data?: HoneymoonRow } | null, FormData>(action, null);
 
-  useEffect(() => { if (state?.ok) onOpenChange(false); }, [state, onOpenChange]);
+  useEffect(() => {
+    if (state?.ok && state?.data) {
+      onSaved(state.data);
+      onOpenChange(false);
+    }
+  }, [state, onOpenChange, onSaved]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -187,6 +205,17 @@ function HoneymoonDialog({
           <div className="flex flex-col gap-2">
             <Label htmlFor="best_time">Best time to visit (optional)</Label>
             <Input id="best_time" name="best_time" defaultValue={editing?.best_time ?? ""} placeholder="e.g. November" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="start_date">Trip start date (optional)</Label>
+              <Input id="start_date" name="start_date" type="date" defaultValue={editing?.start_date ?? ""} />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="end_date">Trip end date (optional)</Label>
+              <Input id="end_date" name="end_date" type="date" defaultValue={editing?.end_date ?? ""} />
+            </div>
           </div>
 
           <div className="flex flex-col gap-2">

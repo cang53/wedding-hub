@@ -86,6 +86,9 @@ export interface HoneymoonRow {
   notes: string | null;
   link: string | null;
   favorite: boolean;
+  start_date: string | null;
+  end_date: string | null;
+  images: string | null;
   created_at: string;
   updated_at: string;
 }
