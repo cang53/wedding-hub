@@ -199,6 +199,7 @@ export function HoneymoonClient({ initialItems }: Props) {
       )}
 
       <HoneymoonDialog
+        key={editing?.id ?? "new"}
         open={dialogOpen}
         onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditing(null); }}
         editing={editing}
