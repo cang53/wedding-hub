@@ -9,21 +9,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { createDestination, deleteDestination, toggleFavorite, updateDestination, uploadHoneymoonImages, deleteHoneymoonImage } from "./actions";
 
 interface Props {
   initialItems: HoneymoonRow[];
-}
-
-function deriveStatus(d: HoneymoonRow): "dreaming" | "planning" | "booked" {
-  if (d.start_date) return "booked";
-  if (d.best_time || d.budget) return "planning";
-  return "dreaming";
 }
 
 function getNights(start: string | null, end: string | null): number | null {
@@ -46,12 +37,6 @@ function formatTripDates(start: string | null, end: string | null): string {
   return `${s} → ${e}`;
 }
 
-const STATUS_LABELS = { dreaming: "Dreaming ✨", planning: "Planning 📋", booked: "Booked ✈️" };
-const STATUS_COLORS: Record<string, string> = {
-  dreaming: "dest-status-dreaming",
-  planning: "dest-status-planning",
-  booked: "dest-status-booked",
-};
 
 export function HoneymoonClient({ initialItems }: Props) {
   const [items, setItems] = useState<HoneymoonRow[]>(initialItems);
@@ -79,12 +64,7 @@ export function HoneymoonClient({ initialItems }: Props) {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  const sorted = [...items].sort((a, b) => {
-    if (a.favorite !== b.favorite) return b.favorite ? 1 : -1;
-    const sa = deriveStatus(a), sb = deriveStatus(b);
-    const order = { booked: 0, planning: 1, dreaming: 2 };
-    return order[sa] - order[sb];
-  });
+  const sorted = [...items].sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0));
 
   const handleToggleFav = (item: HoneymoonRow) => {
     setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, favorite: !i.favorite } : i)));
@@ -116,7 +96,6 @@ export function HoneymoonClient({ initialItems }: Props) {
       ) : (
         <div className="dest-grid">
           {sorted.map((d) => {
-            const status = deriveStatus(d);
             const nights = getNights(d.start_date, d.end_date);
             const countdown = getCountdown(d.start_date);
             const images = (() => { try { return d.images ? JSON.parse(d.images) as string[] : []; } catch { return []; } })();
@@ -133,7 +112,6 @@ export function HoneymoonClient({ initialItems }: Props) {
                   )}
                   <div className="dest-hero-overlay2">
                     <div className="dest-hero-top2">
-                      <span className={`dest-status-badge ${STATUS_COLORS[status]}`}>{STATUS_LABELS[status]}</span>
                       <button
                         type="button"
                         className="dest-heart2"
