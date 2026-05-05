@@ -9,6 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { createDestination, deleteDestination, toggleFavorite, updateDestination, uploadHoneymoonImages, deleteHoneymoonImage } from "./actions";
@@ -16,6 +19,39 @@ import { createDestination, deleteDestination, toggleFavorite, updateDestination
 interface Props {
   initialItems: HoneymoonRow[];
 }
+
+function deriveStatus(d: HoneymoonRow): "dreaming" | "planning" | "booked" {
+  if (d.start_date) return "booked";
+  if (d.best_time || d.budget) return "planning";
+  return "dreaming";
+}
+
+function getNights(start: string | null, end: string | null): number | null {
+  if (!start || !end) return null;
+  const diff = new Date(end).getTime() - new Date(start).getTime();
+  return Math.round(diff / (1000 * 60 * 60 * 24));
+}
+
+function getCountdown(start: string | null): number | null {
+  if (!start) return null;
+  const diff = new Date(start).getTime() - Date.now();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
+function formatTripDates(start: string | null, end: string | null): string {
+  if (!start) return "";
+  const s = new Date(start).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  if (!end) return s;
+  const e = new Date(end).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  return `${s} → ${e}`;
+}
+
+const STATUS_LABELS = { dreaming: "Dreaming ✨", planning: "Planning 📋", booked: "Booked ✈️" };
+const STATUS_COLORS: Record<string, string> = {
+  dreaming: "dest-status-dreaming",
+  planning: "dest-status-planning",
+  booked: "dest-status-booked",
+};
 
 export function HoneymoonClient({ initialItems }: Props) {
   const [items, setItems] = useState<HoneymoonRow[]>(initialItems);
@@ -43,7 +79,12 @@ export function HoneymoonClient({ initialItems }: Props) {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  const sorted = [...items].sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0));
+  const sorted = [...items].sort((a, b) => {
+    if (a.favorite !== b.favorite) return b.favorite ? 1 : -1;
+    const sa = deriveStatus(a), sb = deriveStatus(b);
+    const order = { booked: 0, planning: 1, dreaming: 2 };
+    return order[sa] - order[sb];
+  });
 
   const handleToggleFav = (item: HoneymoonRow) => {
     setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, favorite: !i.favorite } : i)));
@@ -55,6 +96,8 @@ export function HoneymoonClient({ initialItems }: Props) {
     setItems((prev) => prev.filter((i) => i.id !== item.id));
     startTransition(() => { deleteDestination(item.id); });
   };
+
+  const openEdit = (d: HoneymoonRow) => { setEditing(d); setDialogOpen(true); };
 
   return (
     <section className="animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -71,91 +114,109 @@ export function HoneymoonClient({ initialItems }: Props) {
       {items.length === 0 ? (
         <EmptyState />
       ) : (
-        <div className="destinations-grid">
-          {sorted.map((d) => (
-            <div key={d.id} className={`dest-card${d.favorite ? " favorited" : ""}`}>
-              <button
-                type="button"
-                className="heart"
-                onClick={() => handleToggleFav(d)}
-                aria-label={d.favorite ? "Remove from favourites" : "Add to favourites"}
-              >
-                {d.favorite ? "♥" : "♡"}
-              </button>
-              <h4
-                className="cursor-pointer hover:text-burgundy transition-colors"
-                onClick={() => { setEditing(d); setDialogOpen(true); }}
-              >
-                {d.name}
-              </h4>
-              {d.country && <div className="location">{d.country}</div>}
-              <div className="stats">
-                {d.budget != null && (
-                  <div className="stat-mini">
-                    <span className="k">Budget</span>
-                    <span className="v">{formatMoney(d.budget)}</span>
+        <div className="dest-grid">
+          {sorted.map((d) => {
+            const status = deriveStatus(d);
+            const nights = getNights(d.start_date, d.end_date);
+            const countdown = getCountdown(d.start_date);
+            const images = (() => { try { return d.images ? JSON.parse(d.images) as string[] : []; } catch { return []; } })();
+            const heroImage = images[0] ?? null;
+
+            return (
+              <article key={d.id} className={`dest-card2${d.favorite ? " is-fav" : ""}`}>
+                {/* Hero */}
+                <div className="dest-hero2" style={heroImage ? { backgroundImage: `url(${heroImage})` } : undefined} onClick={() => openEdit(d)}>
+                  {!heroImage && (
+                    <div className="dest-hero-placeholder2">
+                      <span>{d.name.charAt(0)}</span>
+                    </div>
+                  )}
+                  <div className="dest-hero-overlay2">
+                    <div className="dest-hero-top2">
+                      <span className={`dest-status-badge ${STATUS_COLORS[status]}`}>{STATUS_LABELS[status]}</span>
+                      <button
+                        type="button"
+                        className="dest-heart2"
+                        onClick={(e) => { e.stopPropagation(); handleToggleFav(d); }}
+                        aria-label={d.favorite ? "Remove from favourites" : "Add to favourites"}
+                      >
+                        {d.favorite ? "♥" : "♡"}
+                      </button>
+                    </div>
+                    <div className="dest-hero-bottom2">
+                      <h4 className="dest-name2">{d.name}</h4>
+                      {d.country && <p className="dest-country2">{d.country}</p>}
+                    </div>
                   </div>
-                )}
-                {d.duration && (
-                  <div className="stat-mini">
-                    <span className="k">Duration</span>
-                    <span className="v">{d.duration}</span>
+                </div>
+
+                {/* Body */}
+                <div className="dest-body2">
+                  {/* Chips row */}
+                  <div className="dest-chips2">
+                    {d.budget != null && (
+                      <span className="dest-chip2">
+                        <span className="chip-icon">€</span>{formatMoney(d.budget)}<span className="chip-sub">/person</span>
+                      </span>
+                    )}
+                    {nights != null ? (
+                      <span className="dest-chip2">
+                        <span className="chip-icon">🌙</span>{nights} nights
+                      </span>
+                    ) : d.duration ? (
+                      <span className="dest-chip2">
+                        <span className="chip-icon">⏱</span>{d.duration}
+                      </span>
+                    ) : null}
+                    {d.best_time && !d.start_date && (
+                      <span className="dest-chip2">
+                        <span className="chip-icon">🌤</span>{d.best_time}
+                      </span>
+                    )}
                   </div>
-                )}
-                {d.best_time && (
-                  <div className="stat-mini">
-                    <span className="k">Best time</span>
-                    <span className="v">{d.best_time}</span>
+
+                  {/* Trip dates */}
+                  {d.start_date && (
+                    <div className="dest-dates2">
+                      <span className="dates-range">✈ {formatTripDates(d.start_date, d.end_date)}</span>
+                      {countdown != null && (
+                        <span className={`dates-countdown ${countdown <= 30 ? "soon" : ""}`}>
+                          {countdown > 0 ? `${countdown}d to go` : countdown === 0 ? "Today!" : "Passed"}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Extra images strip */}
+                  {images.length > 1 && (
+                    <div className="dest-images-strip">
+                      {images.slice(1, 4).map((url, i) => (
+                        <div key={i} className="strip-thumb" style={{ backgroundImage: `url(${url})` }}>
+                          {i === 2 && images.length > 4 && (
+                            <div className="strip-more">+{images.length - 4}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Notes */}
+                  {d.notes && <p className="dest-notes2">&ldquo;{d.notes}&rdquo;</p>}
+
+                  {/* Footer */}
+                  <div className="dest-footer2">
+                    <button className="dest-edit-btn" onClick={() => openEdit(d)}>Edit</button>
+                    {d.link && (
+                      <a href={d.link} target="_blank" rel="noopener noreferrer" className="dest-link-btn">
+                        Explore ↗
+                      </a>
+                    )}
+                    <button className="dest-delete-btn" onClick={() => handleDelete(d)}>✕</button>
                   </div>
-                )}
-                {d.start_date && (
-                  <div className="stat-mini">
-                    <span className="k">Trip dates</span>
-                    <span className="v">{new Date(d.start_date).toLocaleDateString("en-GB", { month: "short", day: "numeric" })} {d.end_date ? `- ${new Date(d.end_date).toLocaleDateString("en-GB", { month: "short", day: "numeric", year: "numeric" })}` : ""}</span>
-                  </div>
-                )}
-              </div>
-              {d.images && (() => {
-                const images = JSON.parse(d.images) as string[];
-                return images.length > 0 && (
-                  <div className="gallery">
-                    {images.map((url, i) => (
-                      <div key={i} className="gallery-item">
-                        <img src={url} alt="destination" />
-                        <button
-                          type="button"
-                          className="delete-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (confirm("Delete this image?")) {
-                              startTransition(() => {
-                                deleteHoneymoonImage(d.id, url).then((result) => {
-                                  if (result.ok && result.data) {
-                                    setItems((prev) => prev.map((i) => (i.id === result.data!.id ? result.data! : i)));
-                                  }
-                                });
-                              });
-                            }
-                          }}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-              {d.notes && <div className="notes">{d.notes}</div>}
-              <div className="actions">
-                {d.link && (
-                  <a href={d.link} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm">
-                    View
-                  </a>
-                )}
-                <Button variant="danger" size="sm" onClick={() => handleDelete(d)}>Delete</Button>
-              </div>
-            </div>
-          ))}
+                </div>
+              </article>
+            );
+          })}
         </div>
       )}
 
@@ -177,10 +238,10 @@ export function HoneymoonClient({ initialItems }: Props) {
 
 function EmptyState() {
   return (
-    <div className="text-center py-15 px-5 text-ink-soft">
-      <div className="empty-ornament mb-3">✈</div>
-      <p className="font-serif italic text-[22px]">No destinations yet.</p>
-      <p className="text-[13px] mt-2">Where shall we go?</p>
+    <div className="text-center py-20 px-5 text-ink-soft">
+      <div className="text-6xl mb-4 opacity-40">✈</div>
+      <p className="font-serif italic text-[26px] text-ink mb-2">No destinations yet.</p>
+      <p className="text-[13px]">Add your dream destinations and start planning your perfect honeymoon.</p>
     </div>
   );
 }
@@ -199,6 +260,15 @@ function HoneymoonDialog({
   const [state, formAction, pending] = useActionState<{ error?: string; ok?: true; data?: HoneymoonRow } | null, FormData>(action, null);
   const pendingImagesRef = useRef<File[]>([]);
   const handledStateRef = useRef<string | null>(null);
+  const [startDate, setStartDate] = useState(editing?.start_date ?? "");
+  const [endDate, setEndDate] = useState(editing?.end_date ?? "");
+
+  useEffect(() => {
+    setStartDate(editing?.start_date ?? "");
+    setEndDate(editing?.end_date ?? "");
+  }, [editing?.id]);
+
+  const nights = getNights(startDate || null, endDate || null);
 
   const handleFormSubmit = (formData: FormData) => {
     const imagesInput = document.getElementById("images") as HTMLInputElement;
@@ -213,12 +283,10 @@ function HoneymoonDialog({
     handledStateRef.current = state.data.id;
 
     const files = pendingImagesRef.current;
-
     if (files.length > 0) {
       const uploadFormData = new FormData();
       files.forEach(file => uploadFormData.append("images", file));
       pendingImagesRef.current = [];
-
       startTransition(() => {
         uploadHoneymoonImages(state.data!.id, uploadFormData).then((result) => {
           onSaved(result.ok && result.data ? result.data : state.data!);
@@ -231,111 +299,119 @@ function HoneymoonDialog({
     }
   }, [state?.ok, state?.data?.id]);
 
+  const currentImages = (() => {
+    try { return editing?.images ? JSON.parse(editing.images) as string[] : []; } catch { return []; }
+  })();
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editing ? <>Edit <em>destination</em></> : <>New <em>destination</em></>}</DialogTitle>
-          <DialogDescription>Where could we go?</DialogDescription>
+          <DialogDescription>Dream it, plan it, book it.</DialogDescription>
         </DialogHeader>
 
         <form action={handleFormSubmit} className="flex flex-col gap-4 mt-2">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="name">Place name</Label>
-            <Input id="name" name="name" defaultValue={editing?.name ?? ""} placeholder="e.g. Punta Cana" required autoFocus />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="country">Country / region</Label>
-            <Input id="country" name="country" defaultValue={editing?.country ?? ""} placeholder="e.g. Dominican Republic" />
-          </div>
-
+          {/* Core identity */}
           <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="budget">Budget per person (€)</Label>
-              <Input id="budget" name="budget" type="number" min="0" defaultValue={editing?.budget ?? ""} />
+            <div className="col-span-2 flex flex-col gap-2 max-md:col-span-1">
+              <Label htmlFor="name">Destination</Label>
+              <Input id="name" name="name" defaultValue={editing?.name ?? ""} placeholder="e.g. Punta Cana" required autoFocus />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="duration">Duration</Label>
+              <Label htmlFor="country">Country / region</Label>
+              <Input id="country" name="country" defaultValue={editing?.country ?? ""} placeholder="e.g. Dominican Republic" />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="budget">Budget / person (€)</Label>
+              <Input id="budget" name="budget" type="number" min="0" defaultValue={editing?.budget ?? ""} placeholder="0" />
+            </div>
+          </div>
+
+          {/* Dates */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <Label>Trip dates</Label>
+              {nights != null && nights > 0 && (
+                <span className="text-xs text-ink-soft bg-cream-deep px-2 py-0.5 rounded">{nights} nights</span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3.5">
+              <Input
+                id="start_date" name="start_date" type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+              <Input
+                id="end_date" name="end_date" type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Extra details */}
+          <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="duration">Duration (if no dates)</Label>
               <Input id="duration" name="duration" defaultValue={editing?.duration ?? ""} placeholder="e.g. 10 days" />
             </div>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="best_time">Best time to visit (optional)</Label>
-            <Input id="best_time" name="best_time" defaultValue={editing?.best_time ?? ""} placeholder="e.g. November" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="start_date">Trip start date (optional)</Label>
-              <Input id="start_date" name="start_date" type="date" defaultValue={editing?.start_date ?? ""} />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="end_date">Trip end date (optional)</Label>
-              <Input id="end_date" name="end_date" type="date" defaultValue={editing?.end_date ?? ""} />
+              <Label htmlFor="best_time">Best time to visit</Label>
+              <Input id="best_time" name="best_time" defaultValue={editing?.best_time ?? ""} placeholder="e.g. November" />
             </div>
           </div>
 
+          {/* Notes & link */}
           <div className="flex flex-col gap-2">
-            <Label htmlFor="notes">Notes / what we love about it</Label>
-            <Textarea id="notes" name="notes" defaultValue={editing?.notes ?? ""} />
+            <Label htmlFor="notes">Why we love it</Label>
+            <Textarea id="notes" name="notes" defaultValue={editing?.notes ?? ""} placeholder="What excites you about this place…" className="min-h-[72px]" />
           </div>
-
           <div className="flex flex-col gap-2">
             <Label htmlFor="link">Link (optional)</Label>
             <Input id="link" name="link" type="url" defaultValue={editing?.link ?? ""} placeholder="https://…" />
           </div>
 
+          {/* Images */}
           <div className="flex flex-col gap-2">
-            <Label htmlFor="images">Add images</Label>
-            <input id="images" type="file" multiple accept="image/*" className="block w-full text-sm text-ink-soft file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-cream-deep file:text-ink hover:file:bg-cream" />
-            <p className="text-xs text-ink-soft">Upload one or more images for this destination</p>
+            <Label htmlFor="images">Add photos</Label>
+            <input id="images" type="file" multiple accept="image/*"
+              className="block w-full text-sm text-ink-soft file:mr-4 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-cream-deep file:text-ink hover:file:bg-line cursor-pointer" />
           </div>
 
-          {editing && editing.images && (() => {
-            try {
-              const currentImages = JSON.parse(editing.images) as string[];
-              return currentImages.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <p className="text-sm font-medium">Current images</p>
-                <div className="gallery">
-                  {currentImages.map((url, i) => (
-                    <div key={i} className="gallery-item">
-                      <img src={url} alt="destination" />
-                      <button
-                        type="button"
-                        className="delete-btn"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (confirm("Delete this image?")) {
-                            startTransition(() => {
-                              deleteHoneymoonImage(editing.id, url).then((result) => {
-                                if (result.ok && result.data) {
-                                  setEditing(result.data);
-                                }
-                              });
+          {/* Current images */}
+          {currentImages.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <Label>Current photos</Label>
+              <div className="gallery">
+                {currentImages.map((url, i) => (
+                  <div key={i} className="gallery-item">
+                    <img src={url} alt="destination" />
+                    <button
+                      type="button"
+                      className="delete-btn"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (confirm("Delete this photo?")) {
+                          startTransition(() => {
+                            deleteHoneymoonImage(editing!.id, url).then((result) => {
+                              if (result.ok && result.data) setEditing(result.data);
                             });
-                          }
-                        }}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                          });
+                        }
+                      }}
+                    >✕</button>
+                  </div>
+                ))}
               </div>
-              );
-            } catch (e) {
-              return null;
-            }
-          })()}
+            </div>
+          )}
 
           {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
+            <Button type="submit" disabled={pending}>{pending ? "Saving…" : editing ? "Save changes" : "Add destination"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
