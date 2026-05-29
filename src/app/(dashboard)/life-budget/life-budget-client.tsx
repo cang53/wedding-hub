@@ -786,6 +786,8 @@ export function LifeBudgetClient({
           purchases={purchases}
           settings={settings}
           startingCash={weddingCashOnHand}
+          groomStartingCash={perPersonStartingCash.groom}
+          brideStartingCash={perPersonStartingCash.bride}
           projection={projection}
           onAssignDay={handleAssignDay}
         />
@@ -3442,11 +3444,13 @@ interface CalendarViewProps {
   purchases: LifePurchaseRow[];
   settings: LifeSettingsRow;
   startingCash: number;
+  groomStartingCash: number;
+  brideStartingCash: number;
   projection: Array<{ month: string; income: number; fixed: number; purchases: number; net: number; cumulative: number }>;
   onAssignDay: (type: "income" | "expense" | "purchase", id: string, day: number | null) => void;
 }
 
-function CalendarView({ income, expenses, purchases, settings, startingCash, projection, onAssignDay }: CalendarViewProps) {
+function CalendarView({ income, expenses, purchases, settings, startingCash, groomStartingCash, brideStartingCash, projection, onAssignDay }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(settings.start_month);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [personFilter, setPersonFilter] = useState<CalendarPersonFilter>("all");
@@ -3508,26 +3512,38 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, pro
   const unscheduledEvents = useMemo(() => allEvents.filter((e) => e.day === null), [allEvents]);
 
   const cashAtMonthStart = useMemo(() => {
-    // Recompute from startingCash (= weddingCashOnHand) directly — do not rely on
-    // projection which may have been built from a different base value.
-    let cash = startingCash;
+    // Base savings pot depends on the active person filter: the full combined
+    // ledger for "all", or that person's pot (personal savings + half of the
+    // common fund) when filtering on groom/bride.
+    let cash = personFilter === "all"
+      ? startingCash
+      : personFilter === "groom" ? groomStartingCash : brideStartingCash;
+
+    // Walk forward from the horizon start, accumulating each prior month's flows
+    // using the same person-aware splitting as the calendar events below.
     const allMonths = monthsList(settings.start_month, settings.horizon_months);
     for (const month of allMonths) {
       if (month >= currentMonth) break;
-      income.forEach((i) => {
-        if (isActiveInMonth(i.start_month, i.end_month, month)) cash += Number(i.amount);
+      filteredIncome.forEach((i) => {
+        if (isActiveInMonth(i.start_month, i.end_month, month)) {
+          cash += personFilter !== "all" && i.person === "both" ? Number(i.amount) * 0.5 : Number(i.amount);
+        }
       });
-      expenses.forEach((e) => {
-        if (isActiveInMonth(e.start_month, e.end_month, month)) cash -= Number(e.amount);
+      filteredExpenses.forEach((e) => {
+        if (isActiveInMonth(e.start_month, e.end_month, month)) {
+          const share = personFilter !== "all" ? personShare(e.payer, e.payer_groom_pct, personFilter) : 1;
+          cash -= Number(e.amount) * share;
+        }
       });
-      purchases.forEach((p) => {
+      filteredPurchases.forEach((p) => {
         if (p.scheduled && p.target_month === month) {
-          cash -= Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0));
+          const share = personFilter !== "all" ? personShare(p.payer, p.payer_groom_pct, personFilter) : 1;
+          cash -= Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)) * share;
         }
       });
     }
     return cash;
-  }, [currentMonth, income, expenses, purchases, settings, startingCash]);
+  }, [currentMonth, filteredIncome, filteredExpenses, filteredPurchases, settings, startingCash, groomStartingCash, brideStartingCash, personFilter]);
 
   const timelineNodes = useMemo((): TLNode[] => {
     const map = new Map<number, (CalEv & { day: number })[]>();
