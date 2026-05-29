@@ -35,7 +35,7 @@ import {
   createIncome, updateIncome, deleteIncome,
   createExpense, updateExpense, deleteExpense,
   createPurchase, updatePurchase, deletePurchase, togglePurchaseScheduled,
-  updateSettings,
+  updateSettings, assignDayOfMonth,
 } from "./actions";
 import { createSavingEntry, updateSavingEntry, deleteSavingEntry } from "../budget/savings-actions";
 
@@ -377,6 +377,17 @@ export function LifeBudgetClient({
           await deleteSavingEntry(item.id);
         });
       },
+    });
+  };
+
+  // ---- Assign day of month (calendar drag-and-drop) -----------------------
+  const handleAssignDay = (type: "income" | "expense" | "purchase", id: string, day: number | null) => {
+    if (type === "income") setIncome((prev) => prev.map((i) => i.id === id ? { ...i, day_of_month: day } : i));
+    else if (type === "expense") setExpenses((prev) => prev.map((e) => e.id === id ? { ...e, day_of_month: day } : e));
+    else setPurchases((prev) => prev.map((p) => p.id === id ? { ...p, day_of_month: day } : p));
+    startTransition(() => {
+      const table = type === "income" ? "life_income" : type === "expense" ? "life_expenses" : "life_purchases";
+      assignDayOfMonth(table, id, day);
     });
   };
 
@@ -778,6 +789,7 @@ export function LifeBudgetClient({
           settings={settings}
           startingCash={startingCash}
           projection={projection}
+          onAssignDay={handleAssignDay}
         />
       )}
 
@@ -3265,6 +3277,9 @@ function ExpandedSavingsDialog({
 // CalendarView
 // ============================================================================
 
+type CalendarPersonFilter = "all" | "groom" | "bride";
+type CalendarDragItem = { id: string; type: "income" | "expense" | "purchase" };
+
 interface CalendarViewProps {
   income: LifeIncomeRow[];
   expenses: LifeExpenseRow[];
@@ -3272,11 +3287,14 @@ interface CalendarViewProps {
   settings: LifeSettingsRow;
   startingCash: number;
   projection: Array<{ month: string; income: number; fixed: number; purchases: number; net: number; cumulative: number }>;
+  onAssignDay: (type: "income" | "expense" | "purchase", id: string, day: number | null) => void;
 }
 
-function CalendarView({ income, expenses, purchases, settings, startingCash, projection }: CalendarViewProps) {
+function CalendarView({ income, expenses, purchases, settings, startingCash, projection, onAssignDay }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(settings.start_month);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  const [personFilter, setPersonFilter] = useState<CalendarPersonFilter>("all");
+  const [dragOverDay, setDragOverDay] = useState<number | null>(null);
 
   const maxMonth = useMemo(() => {
     if (projection.length > 0) return projection[projection.length - 1].month;
@@ -3294,28 +3312,51 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, pro
     setSelectedDay(null);
   };
 
-  const events = useMemo(() => {
-    const out: { id: string; type: "income" | "expense" | "purchase"; name: string; amount: number; day: number }[] = [];
-    income.forEach((i) => {
-      if (isActiveInMonth(i.start_month, i.end_month, currentMonth))
-        out.push({ id: i.id, type: "income", name: i.name, amount: Number(i.amount), day: i.day_of_month ?? 1 });
+  // Filtered source arrays by person
+  const filteredIncome = useMemo(() =>
+    personFilter === "all" ? income : income.filter((i) => i.person === personFilter || i.person === "both"),
+    [income, personFilter]);
+  const filteredExpenses = useMemo(() =>
+    personFilter === "all" ? expenses : expenses.filter((e) => e.payer === personFilter || e.payer === "both"),
+    [expenses, personFilter]);
+  const filteredPurchases = useMemo(() =>
+    personFilter === "all" ? purchases : purchases.filter((p) => p.payer === personFilter || p.payer === "both"),
+    [purchases, personFilter]);
+
+  // Active items this month — split into scheduled (has day) and unscheduled
+  type CalEv = { id: string; type: "income" | "expense" | "purchase"; name: string; amount: number; day: number | null };
+
+  const allEvents = useMemo(() => {
+    const out: CalEv[] = [];
+    filteredIncome.forEach((i) => {
+      if (isActiveInMonth(i.start_month, i.end_month, currentMonth)) {
+        const amt = personFilter !== "all" && i.person === "both" ? Number(i.amount) * 0.5 : Number(i.amount);
+        out.push({ id: i.id, type: "income", name: i.name, amount: amt, day: i.day_of_month ?? null });
+      }
     });
-    expenses.forEach((e) => {
-      if (isActiveInMonth(e.start_month, e.end_month, currentMonth))
-        out.push({ id: e.id, type: "expense", name: e.name, amount: Number(e.amount), day: e.day_of_month ?? 1 });
+    filteredExpenses.forEach((e) => {
+      if (isActiveInMonth(e.start_month, e.end_month, currentMonth)) {
+        const share = personFilter !== "all" ? personShare(e.payer, e.payer_groom_pct, personFilter) : 1;
+        out.push({ id: e.id, type: "expense", name: e.name, amount: Number(e.amount) * share, day: e.day_of_month ?? null });
+      }
     });
-    purchases.forEach((p) => {
-      if (p.scheduled && p.target_month === currentMonth)
-        out.push({ id: p.id, type: "purchase", name: p.name, amount: Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)), day: p.day_of_month ?? 15 });
+    filteredPurchases.forEach((p) => {
+      if (p.scheduled && p.target_month === currentMonth) {
+        const share = personFilter !== "all" ? personShare(p.payer, p.payer_groom_pct, personFilter) : 1;
+        const rem = Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0));
+        out.push({ id: p.id, type: "purchase", name: p.name, amount: rem * share, day: p.day_of_month ?? null });
+      }
     });
     return out;
-  }, [currentMonth, income, expenses, purchases]);
+  }, [currentMonth, filteredIncome, filteredExpenses, filteredPurchases, personFilter]);
+
+  const scheduledEvents = useMemo(() => allEvents.filter((e) => e.day !== null) as (CalEv & { day: number })[], [allEvents]);
+  const unscheduledEvents = useMemo(() => allEvents.filter((e) => e.day === null), [allEvents]);
 
   const cashAtMonthStart = useMemo(() => {
     const idx = projection.findIndex((p) => p.month === currentMonth);
     if (idx === 0) return startingCash;
     if (idx > 0) return projection[idx - 1].cumulative;
-    // Before or beyond horizon — compute by summing
     let cash = startingCash;
     for (const p of projection) {
       if (p.month >= currentMonth) break;
@@ -3331,48 +3372,72 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, pro
     const arr: number[] = Array(daysInMonth + 1).fill(0);
     let cash = cashAtMonthStart;
     for (let d = 1; d <= daysInMonth; d++) {
-      events.filter((e) => e.day === d).forEach((ev) => {
+      scheduledEvents.filter((e) => e.day === d).forEach((ev) => {
         cash += ev.type === "income" ? ev.amount : -ev.amount;
       });
       arr[d] = cash;
     }
     return arr;
-  }, [events, cashAtMonthStart, daysInMonth]);
+  }, [scheduledEvents, cashAtMonthStart, daysInMonth]);
 
   const monthTotals = useMemo(() => {
-    const inc = events.filter((e) => e.type === "income").reduce((a, e) => a + e.amount, 0);
-    const exp = events.filter((e) => e.type === "expense").reduce((a, e) => a + e.amount, 0);
-    const pur = events.filter((e) => e.type === "purchase").reduce((a, e) => a + e.amount, 0);
-    return { inc, exp, pur, end: cashAtMonthStart + inc - exp - pur };
-  }, [events, cashAtMonthStart]);
+    const inc = scheduledEvents.filter((e) => e.type === "income").reduce((a, e) => a + e.amount, 0);
+    const exp = scheduledEvents.filter((e) => e.type === "expense").reduce((a, e) => a + e.amount, 0);
+    const pur = scheduledEvents.filter((e) => e.type === "purchase").reduce((a, e) => a + e.amount, 0);
+    const unschedInc = unscheduledEvents.filter((e) => e.type === "income").reduce((a, e) => a + e.amount, 0);
+    const unschedOut = unscheduledEvents.filter((e) => e.type !== "income").reduce((a, e) => a + e.amount, 0);
+    return { inc: inc + unschedInc, exp: exp + unschedOut, pur, end: cashAtMonthStart + inc + unschedInc - exp - unschedOut - pur };
+  }, [scheduledEvents, unscheduledEvents, cashAtMonthStart]);
 
-  const firstDayOfWeek = new Date(y, m - 1, 1).getDay(); // 0=Sun
-  const leadingCells = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1; // Monday-first grid
+  const firstDayOfWeek = new Date(y, m - 1, 1).getDay();
+  const leadingCells = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
 
   const todayStr = dateToMonth(new Date());
   const todayDay = todayStr === currentMonth ? new Date().getDate() : null;
 
   const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+  const handleDrop = (day: number, e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverDay(null);
+    const raw = e.dataTransfer.getData("application/json");
+    if (!raw) return;
+    const { id, type } = JSON.parse(raw) as CalendarDragItem;
+    onAssignDay(type, id, day);
+  };
+
+  const handleUnassign = (ev: CalEv, e: React.MouseEvent) => {
+    e.stopPropagation();
+    onAssignDay(ev.type, ev.id, null);
+  };
+
   return (
     <div className="animate-in fade-in duration-200">
-      {/* Navigation */}
-      <div className="flex items-center justify-between mb-4">
-        <button
-          type="button"
-          onClick={() => goMonth(-1)}
-          disabled={currentMonth <= settings.start_month}
-          className="px-3 py-1.5 text-[13px] border border-line rounded-[4px] hover:bg-cream/60 disabled:opacity-30 disabled:cursor-not-allowed"
-        >← Prev</button>
-        <div className="font-serif text-[22px] text-ink">
+      {/* Top bar: navigation + person filter */}
+      <div className="flex items-center gap-4 mb-4 flex-wrap">
+        <button type="button" onClick={() => goMonth(-1)} disabled={currentMonth <= settings.start_month}
+          className="px-3 py-1.5 text-[13px] border border-line rounded-[4px] hover:bg-cream/60 disabled:opacity-30 disabled:cursor-not-allowed">← Prev</button>
+        <div className="font-serif text-[22px] text-ink flex-1 text-center">
           {monthToDate(currentMonth).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}
         </div>
-        <button
-          type="button"
-          onClick={() => goMonth(1)}
-          disabled={currentMonth >= maxMonth}
-          className="px-3 py-1.5 text-[13px] border border-line rounded-[4px] hover:bg-cream/60 disabled:opacity-30 disabled:cursor-not-allowed"
-        >Next →</button>
+        <button type="button" onClick={() => goMonth(1)} disabled={currentMonth >= maxMonth}
+          className="px-3 py-1.5 text-[13px] border border-line rounded-[4px] hover:bg-cream/60 disabled:opacity-30 disabled:cursor-not-allowed">Next →</button>
+      </div>
+
+      {/* Person filter */}
+      <div className="flex gap-0 mb-4 border border-line rounded-[6px] overflow-hidden bg-cream-deep/40 w-fit">
+        {(["all", "groom", "bride"] as const).map((f) => {
+          const active = personFilter === f;
+          const activeClass = f === "groom" ? "bg-paper text-sage border-b-2 border-sage shadow-soft"
+            : f === "bride" ? "bg-paper text-rose border-b-2 border-rose shadow-soft"
+            : "bg-paper text-ink border-b-2 border-ink shadow-soft";
+          return (
+            <button key={f} type="button" onClick={() => setPersonFilter(f)}
+              className={`px-5 py-2 text-[12px] font-medium transition-colors border-b-2 ${active ? activeClass : "border-transparent text-ink-soft hover:bg-cream/60 hover:text-ink"}`}>
+              {f === "all" ? "All" : f === "groom" ? "Groom" : "Bride"}
+            </button>
+          );
+        })}
       </div>
 
       {/* Summary strip */}
@@ -3384,60 +3449,110 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, pro
         <span className={monthTotals.end >= cashAtMonthStart ? "text-sage" : "text-burgundy"}>
           Ending <strong className="font-mono">{formatMoney(monthTotals.end)}</strong>
         </span>
+        {unscheduledEvents.length > 0 && (
+          <span className="text-ink-soft italic">{unscheduledEvents.length} item{unscheduledEvents.length > 1 ? "s" : ""} not pinned to a day →</span>
+        )}
       </div>
 
-      {/* Calendar grid */}
-      <div className="bg-paper border border-line rounded-[4px] overflow-hidden shadow-soft">
-        {/* Day headers */}
-        <div className="grid grid-cols-7 border-b border-line">
-          {DAY_LABELS.map((d) => (
-            <div key={d} className="py-2 text-center text-[10px] uppercase tracking-[0.2em] text-ink-soft font-medium">{d}</div>
-          ))}
+      {/* Main layout: calendar + sidebar */}
+      <div className="flex gap-5 items-start max-lg:flex-col">
+
+        {/* Calendar grid */}
+        <div className="flex-1 min-w-0 bg-paper border border-line rounded-[4px] overflow-hidden shadow-soft">
+          <div className="grid grid-cols-7 border-b border-line">
+            {DAY_LABELS.map((d) => (
+              <div key={d} className="py-2 text-center text-[10px] uppercase tracking-[0.2em] text-ink-soft font-medium">{d}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7">
+            {Array(leadingCells).fill(null).map((_, i) => (
+              <div key={"lead-" + i} className="min-h-[88px] border-r border-b border-line/50 bg-cream/20" />
+            ))}
+            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
+              const dayEvents = scheduledEvents.filter((e) => e.day === day);
+              const bal = dailyBalances[day];
+              const isToday = day === todayDay;
+              const isSelected = day === selectedDay;
+              const isDragOver = dragOverDay === day;
+              const isNegativeBal = bal < 0 && dayEvents.length > 0;
+              return (
+                <div key={day}
+                  onClick={() => setSelectedDay(isSelected ? null : day)}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverDay(day); }}
+                  onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverDay(null); }}
+                  onDrop={(e) => handleDrop(day, e)}
+                  className={`min-h-[88px] border-r border-b border-line/50 p-1.5 cursor-pointer transition-colors
+                    ${isDragOver ? "ring-2 ring-inset ring-gold/60 bg-gold/8" : isSelected ? "bg-cream-deep" : isNegativeBal ? "bg-burgundy/5 hover:bg-burgundy/10" : "hover:bg-cream/60"}
+                    ${isToday ? "ring-2 ring-ink/20 ring-inset" : ""}
+                  `}
+                >
+                  <div className={`text-right text-[11px] mb-1 ${isToday ? "font-bold text-ink" : "text-ink-soft/60"}`}>{day}</div>
+                  <div className="space-y-0.5">
+                    {dayEvents.map((ev) => (
+                      <div key={ev.id} className={`group/chip rounded px-1 py-0.5 text-[9px] leading-tight border flex items-start gap-0.5
+                        ${ev.type === "income" ? "bg-sage/15 text-sage border-sage/30" : ev.type === "expense" ? "bg-burgundy/10 text-burgundy border-burgundy/20" : "bg-gold/15 text-gold border-gold/30"}
+                      `}>
+                        <div className="flex-1 min-w-0">
+                          <div className="truncate font-medium">{ev.name}</div>
+                          <div className="font-mono">{ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => handleUnassign(ev, e)}
+                          className="opacity-0 group-hover/chip:opacity-70 hover:!opacity-100 text-[10px] leading-none shrink-0 mt-0.5"
+                          title="Move back to unscheduled"
+                        >×</button>
+                      </div>
+                    ))}
+                  </div>
+                  {dayEvents.length > 0 && (
+                    <div className={`mt-1 text-right font-mono text-[9px] ${bal >= 0 ? "text-sage" : "text-burgundy"}`}>{formatMoney(bal)}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        {/* Day cells */}
-        <div className="grid grid-cols-7">
-          {Array(leadingCells).fill(null).map((_, i) => (
-            <div key={"lead-" + i} className="min-h-[80px] border-r border-b border-line/50 bg-cream/20" />
-          ))}
-          {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
-            const dayEvents = events.filter((e) => e.day === day);
-            const bal = dailyBalances[day];
-            const isToday = day === todayDay;
-            const isSelected = day === selectedDay;
-            const isNegativeBal = bal < 0 && dayEvents.length > 0;
-            return (
-              <div
-                key={day}
-                onClick={() => setSelectedDay(isSelected ? null : day)}
-                className={`min-h-[80px] border-r border-b border-line/50 p-1.5 cursor-pointer transition-colors
-                  ${isSelected ? "bg-cream-deep" : isNegativeBal ? "bg-burgundy/5 hover:bg-burgundy/10" : "hover:bg-cream/60"}
-                  ${isToday ? "ring-2 ring-ink/20 ring-inset" : ""}
-                `}
-              >
-                <div className={`text-right text-[11px] mb-1 ${isToday ? "font-bold text-ink" : "text-ink-soft/60"}`}>{day}</div>
-                <div className="space-y-0.5">
-                  {dayEvents.map((ev) => (
-                    <div key={ev.id} className={`rounded px-1 py-0.5 text-[9px] leading-tight border truncate
-                      ${ev.type === "income" ? "bg-sage/15 text-sage border-sage/30" : ev.type === "expense" ? "bg-burgundy/10 text-burgundy border-burgundy/20" : "bg-gold/15 text-gold border-gold/30"}
-                    `}>
-                      <div className="truncate font-medium">{ev.name}</div>
-                      <div className="font-mono">{ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}</div>
+        {/* Sidebar — unscheduled items */}
+        <div className="w-60 shrink-0 max-lg:w-full">
+          <div className="bg-paper border border-line rounded-[4px] shadow-soft sticky top-4">
+            <div className="px-4 py-3 border-b border-line">
+              <div className="text-[10px] uppercase tracking-[0.3em] text-ink-soft font-medium">Not pinned to a day</div>
+              <div className="text-[10px] text-ink-soft mt-1 leading-snug">Drag onto a day to assign, or leave here for monthly totals.</div>
+            </div>
+            {unscheduledEvents.length === 0 ? (
+              <p className="px-4 py-6 text-[11px] italic text-ink-soft text-center">All items have a day pinned.</p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {unscheduledEvents.map((ev) => (
+                  <li key={ev.id}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("application/json", JSON.stringify({ id: ev.id, type: ev.type } satisfies CalendarDragItem));
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
+                    className="flex items-center gap-2.5 px-3 py-2.5 cursor-grab active:cursor-grabbing hover:bg-cream/40 group/item select-none"
+                  >
+                    <span className="text-[13px] shrink-0">{ev.type === "income" ? "💼" : ev.type === "expense" ? "🔁" : "🛋️"}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11px] font-medium text-ink truncate">{ev.name}</div>
+                      <div className={`text-[10px] font-mono ${ev.type === "income" ? "text-sage" : "text-burgundy"}`}>
+                        {ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}
+                      </div>
                     </div>
-                  ))}
-                </div>
-                {dayEvents.length > 0 && (
-                  <div className={`mt-1 text-right font-mono text-[9px] ${bal >= 0 ? "text-sage" : "text-burgundy"}`}>{formatMoney(bal)}</div>
-                )}
-              </div>
-            );
-          })}
+                    <span className="text-[13px] text-ink-soft/30 group-hover/item:text-ink-soft shrink-0" aria-hidden>⠿</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Selected day detail */}
       {selectedDay !== null && (() => {
-        const dayEvents = events.filter((e) => e.day === selectedDay);
+        const dayEvents = scheduledEvents.filter((e) => e.day === selectedDay);
         const openBal = selectedDay === 1 ? cashAtMonthStart : dailyBalances[selectedDay - 1];
         const closeBal = dailyBalances[selectedDay];
         const date = new Date(y, m - 1, selectedDay);
@@ -3448,13 +3563,13 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, pro
               <div className="font-serif text-[18px] text-ink">{dateLabel}</div>
               <button type="button" onClick={() => setSelectedDay(null)} className="text-ink-soft hover:text-ink text-[20px] leading-none">×</button>
             </div>
-            <div className="space-y-1 mb-4">
+            <div className="space-y-1">
               <div className="flex justify-between text-[12px] text-ink-soft pb-2 border-b border-line">
                 <span>Opening balance</span>
                 <span className="font-mono text-ink">{formatMoney(openBal)}</span>
               </div>
               {dayEvents.length === 0 ? (
-                <p className="text-[13px] italic text-ink-soft py-3">No events this day.</p>
+                <p className="text-[13px] italic text-ink-soft py-3">No events pinned to this day.</p>
               ) : dayEvents.map((ev) => (
                 <div key={ev.id} className="flex items-center gap-3 py-1.5 text-[13px]">
                   <span className="text-[16px]">{ev.type === "income" ? "💼" : ev.type === "expense" ? "🔁" : "🛋️"}</span>

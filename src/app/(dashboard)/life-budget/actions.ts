@@ -220,6 +220,19 @@ export async function deletePurchase(id: string): Promise<{ error?: string }> {
   return {};
 }
 
+// ---- Assign day_of_month -------------------------------------------------
+
+export async function assignDayOfMonth(
+  table: "life_income" | "life_expenses" | "life_purchases",
+  id: string,
+  day: number | null,
+) {
+  const supabase = createSupabaseServerClient();
+  const { error } = await supabase.from(table).update({ day_of_month: day } as never).eq("id", id);
+  if (error) return { error: error.message };
+  return {};
+}
+
 // ---- Settings ------------------------------------------------------------
 
 export async function updateSettings(form: FormData) {
