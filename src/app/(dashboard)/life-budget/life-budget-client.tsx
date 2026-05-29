@@ -37,7 +37,7 @@ import {
   createPurchase, updatePurchase, deletePurchase, togglePurchaseScheduled,
   updateSettings, assignDayOfMonth,
 } from "./actions";
-import { createSavingEntry, updateSavingEntry, deleteSavingEntry } from "../budget/savings-actions";
+import { createSavingEntry, updateSavingEntry, deleteSavingEntry } from "./savings-actions";
 
 // ============================================================================
 // Constants
@@ -184,7 +184,6 @@ interface Props {
   initialPurchases: LifePurchaseRow[];
   initialSettings: LifeSettingsRow;
   initialSavings: WeddingSavingsRow[];
-  totalPaidOnWedding: number;
 }
 
 export function LifeBudgetClient({
@@ -193,7 +192,6 @@ export function LifeBudgetClient({
   initialPurchases,
   initialSettings,
   initialSavings,
-  totalPaidOnWedding,
 }: Props) {
   const [income, setIncome] = useState<LifeIncomeRow[]>(initialIncome);
   const [expenses, setExpenses] = useState<LifeExpenseRow[]>(initialExpenses);
@@ -215,10 +213,10 @@ export function LifeBudgetClient({
 
   const [, startTransition] = useTransition();
 
-  // Starting cash: total saved minus what's already been paid on the wedding.
+  // Starting cash: total of the wedding savings ledger.
   const weddingCashOnHand = useMemo(
-    () => Math.max(0, savings.reduce((a, s) => a + Number(s.amount), 0) - totalPaidOnWedding),
-    [savings, totalPaidOnWedding]
+    () => savings.reduce((a, s) => a + Number(s.amount), 0),
+    [savings]
   );
 
   // Starting cash resolves from settings + (optionally) the reactive wedding cash on hand.

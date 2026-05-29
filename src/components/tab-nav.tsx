@@ -13,7 +13,6 @@ const TABS: Tab[] = [
   { href: "/dashboard",  label: "Overview",  icon: "◆" },
   { href: "/todo",       label: "To-Do",     icon: "✓" },
   { href: "/agenda",     label: "Agenda",    icon: "❦" },
-  { href: "/budget",     label: "Budget",    icon: "€" },
   { href: "/life-budget", label: "Life After", icon: "🏡" },
   { href: "/honeymoon",  label: "Honeymoon", icon: "✈" },
   { href: "/guests",     label: "Guests",    icon: "♥" },
