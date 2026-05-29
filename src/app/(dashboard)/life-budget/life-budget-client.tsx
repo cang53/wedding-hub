@@ -3279,6 +3279,164 @@ function ExpandedSavingsDialog({
 
 type CalendarPersonFilter = "all" | "groom" | "bride";
 type CalendarDragItem = { id: string; type: "income" | "expense" | "purchase" };
+type CalEv = { id: string; type: "income" | "expense" | "purchase"; name: string; amount: number; day: number | null };
+type TLNode = { day: number; events: (CalEv & { day: number })[]; balanceBefore: number; balanceAfter: number };
+
+// ============================================================================
+// CashTimeline — horizontal flow of events + running balance
+// ============================================================================
+
+function CashTimeline({
+  nodes, unscheduledEvents, cashAtMonthStart, daysInMonth, currentMonth, selectedDay, onSelectDay,
+}: {
+  nodes: TLNode[];
+  unscheduledEvents: CalEv[];
+  cashAtMonthStart: number;
+  daysInMonth: number;
+  currentMonth: string;
+  selectedDay: number | null;
+  onSelectDay: (day: number | null) => void;
+}) {
+  const PX_PER_DAY = 16;
+  const MIN_GAP = 28;
+  const gap = (days: number) => Math.max(MIN_GAP, days * PX_PER_DAY);
+
+  const scheduledEnd = nodes.length > 0 ? nodes[nodes.length - 1].balanceAfter : cashAtMonthStart;
+  const unschedNet = unscheduledEvents.reduce((a, e) => a + (e.type === "income" ? e.amount : -e.amount), 0);
+  const finalEnd = scheduledEnd + unschedNet;
+  const [cY, cM] = currentMonth.split("-").map(Number);
+
+  const lineCol = (bal: number) => bal >= 0 ? "#7c8a6b" : "#7a1f2b";
+  const txtCol = (bal: number) => bal >= 0 ? "text-sage" : "text-burgundy";
+
+  const Connector = ({ fromBal, days }: { fromBal: number; days: number }) => {
+    const w = gap(days);
+    const c = lineCol(fromBal);
+    return (
+      <div className="flex flex-col items-center justify-center shrink-0 relative" style={{ width: w }}>
+        <div className="text-[9px] font-mono text-ink-soft/40 mb-1.5 h-3 leading-none text-center">
+          {days > 1 ? `${days}d` : ""}
+        </div>
+        <div className="w-full h-[2px]" style={{ background: `linear-gradient(to right, ${c}80, ${c})` }} />
+        <div className={`mt-1.5 text-[9px] font-mono ${txtCol(fromBal)}`}>{formatMoneyShort(fromBal)}</div>
+      </div>
+    );
+  };
+
+  const Cap = ({ label, amount, delta }: { label: string; amount: number; delta?: number }) => (
+    <div className="flex flex-col items-center gap-1 shrink-0">
+      <div className="text-[9px] uppercase tracking-[0.2em] text-ink-soft font-medium">{label}</div>
+      <div className={`w-[52px] h-[52px] rounded-full border-2 flex items-center justify-center ${amount >= 0 ? "border-sage bg-sage/10" : "border-burgundy bg-burgundy/10"}`}>
+        <div className={`text-[9px] font-mono font-bold text-center leading-tight ${txtCol(amount)}`}>
+          {formatMoneyShort(amount)}
+        </div>
+      </div>
+      {delta !== undefined && (
+        <div className={`text-[9px] font-medium ${delta >= 0 ? "text-sage" : "text-burgundy"}`}>
+          {delta >= 0 ? "▲" : "▼"} {formatMoneyShort(Math.abs(delta))}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="mb-5 overflow-x-auto pb-1">
+      <div className="flex items-center min-w-max py-2 px-1">
+        <Cap label="Start" amount={cashAtMonthStart} />
+
+        {nodes.length === 0 && !unscheduledEvents.length ? (
+          <div className="flex-1 mx-6 text-[12px] italic text-ink-soft">
+            Pin events to days on the calendar to see the flow here.
+          </div>
+        ) : (
+          <>
+            {nodes.map((node, idx) => {
+              const prevDay = idx === 0 ? 0 : nodes[idx - 1].day;
+              const isSelected = selectedDay === node.day;
+              const dayLabel = new Date(cY, cM - 1, node.day)
+                .toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+
+              return (
+                <div key={node.day} className="contents">
+                  <Connector fromBal={node.balanceBefore} days={node.day - prevDay} />
+                  <div
+                    onClick={() => onSelectDay(isSelected ? null : node.day)}
+                    className={`shrink-0 cursor-pointer rounded-[6px] border transition-all min-w-[128px] max-w-[160px] p-2.5
+                      ${isSelected
+                        ? "border-ink bg-ink text-cream shadow-lg scale-[1.03] z-10 relative"
+                        : "border-line bg-paper hover:border-ink/30 hover:shadow-soft"
+                      }`}
+                  >
+                    <div className={`text-[10px] font-medium mb-2 ${isSelected ? "text-cream/60" : "text-ink-soft"}`}>{dayLabel}</div>
+                    <div className="space-y-1.5">
+                      {node.events.map((ev) => (
+                        <div key={ev.id} className="flex items-start gap-1.5">
+                          <span className="text-[11px] shrink-0">{ev.type === "income" ? "💼" : ev.type === "expense" ? "🔁" : "🛋️"}</span>
+                          <div className="min-w-0">
+                            <div className={`text-[10px] truncate leading-tight ${isSelected ? "text-cream/80" : "text-ink"}`}>{ev.name}</div>
+                            <div className={`text-[10px] font-mono font-medium ${
+                              isSelected
+                                ? ev.type === "income" ? "text-[#a8c49a]" : "text-[#c47a7a]"
+                                : ev.type === "income" ? "text-sage" : "text-burgundy"
+                            }`}>{ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className={`mt-2 pt-1.5 border-t flex items-center justify-between gap-2 ${isSelected ? "border-cream/20" : "border-line"}`}>
+                      <span className={`text-[9px] ${isSelected ? "text-cream/50" : "text-ink-soft"}`}>After</span>
+                      <span className={`text-[11px] font-mono font-bold ${
+                        isSelected
+                          ? node.balanceAfter >= 0 ? "text-[#a8c49a]" : "text-[#c47a7a]"
+                          : txtCol(node.balanceAfter)
+                      }`}>{formatMoneyShort(node.balanceAfter)}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Connector from last node to end */}
+            <Connector
+              fromBal={nodes.length > 0 ? nodes[nodes.length - 1].balanceAfter : cashAtMonthStart}
+              days={daysInMonth - (nodes.length > 0 ? nodes[nodes.length - 1].day : 0)}
+            />
+
+            {/* Unscheduled block */}
+            {unscheduledEvents.length > 0 && (
+              <>
+                <div className="shrink-0 flex items-center" style={{ width: 24 }}>
+                  <div className="w-full border-t-2 border-dashed border-ink-soft/25" />
+                </div>
+                <div className="shrink-0 rounded-[6px] border border-dashed border-line/70 p-2.5 min-w-[130px] bg-cream/30">
+                  <div className="text-[10px] text-ink-soft font-medium mb-1.5">Unscheduled ({unscheduledEvents.length})</div>
+                  {unscheduledEvents.slice(0, 4).map((ev) => (
+                    <div key={ev.id} className="flex items-center gap-1 mb-0.5">
+                      <span className="text-[10px]">{ev.type === "income" ? "💼" : ev.type === "expense" ? "🔁" : "🛋️"}</span>
+                      <span className={`text-[9px] font-mono shrink-0 ${ev.type === "income" ? "text-sage" : "text-burgundy"}`}>
+                        {ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}
+                      </span>
+                      <span className="text-[9px] text-ink-soft truncate">{ev.name}</span>
+                    </div>
+                  ))}
+                  {unscheduledEvents.length > 4 && <div className="text-[9px] text-ink-soft italic">+{unscheduledEvents.length - 4} more</div>}
+                  <div className={`mt-1.5 pt-1 border-t border-dashed border-line/50 text-[9px] font-mono font-medium ${unschedNet >= 0 ? "text-sage" : "text-burgundy"}`}>
+                    Net: {unschedNet >= 0 ? "+" : "−"}{formatMoney(Math.abs(unschedNet))}
+                  </div>
+                </div>
+                <div className="shrink-0 flex items-center" style={{ width: 16 }}>
+                  <div className="w-full border-t-2 border-dashed border-ink-soft/25" />
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        <Cap label="End" amount={finalEnd} delta={finalEnd - cashAtMonthStart} />
+      </div>
+    </div>
+  );
+}
 
 interface CalendarViewProps {
   income: LifeIncomeRow[];
@@ -3324,8 +3482,6 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, pro
     [purchases, personFilter]);
 
   // Active items this month — split into scheduled (has day) and unscheduled
-  type CalEv = { id: string; type: "income" | "expense" | "purchase"; name: string; amount: number; day: number | null };
-
   const allEvents = useMemo(() => {
     const out: CalEv[] = [];
     filteredIncome.forEach((i) => {
@@ -3365,6 +3521,23 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, pro
     return cash;
   }, [currentMonth, projection, startingCash]);
 
+  const timelineNodes = useMemo((): TLNode[] => {
+    const map = new Map<number, (CalEv & { day: number })[]>();
+    scheduledEvents.forEach((ev) => {
+      const arr = map.get(ev.day) ?? [];
+      arr.push(ev);
+      map.set(ev.day, arr);
+    });
+    const days = Array.from(map.keys()).sort((a, b) => a - b);
+    let balance = cashAtMonthStart;
+    return days.map((day) => {
+      const events = map.get(day)!;
+      const balanceBefore = balance;
+      events.forEach((ev) => { balance += ev.type === "income" ? ev.amount : -ev.amount; });
+      return { day, events, balanceBefore, balanceAfter: balance };
+    });
+  }, [scheduledEvents, cashAtMonthStart]);
+
   const [y, m] = currentMonth.split("-").map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
 
@@ -3397,7 +3570,7 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, pro
 
   const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-  const handleDrop = (day: number, e: React.DragEvent) => {
+  const handleDrop = (day: number, e: { preventDefault: () => void; dataTransfer: DataTransfer }) => {
     e.preventDefault();
     setDragOverDay(null);
     const raw = e.dataTransfer.getData("application/json");
@@ -3406,7 +3579,7 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, pro
     onAssignDay(type, id, day);
   };
 
-  const handleUnassign = (ev: CalEv, e: React.MouseEvent) => {
+  const handleUnassign = (ev: CalEv, e: { stopPropagation: () => void }) => {
     e.stopPropagation();
     onAssignDay(ev.type, ev.id, null);
   };
@@ -3439,6 +3612,17 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, pro
           );
         })}
       </div>
+
+      {/* Cash flow timeline */}
+      <CashTimeline
+        nodes={timelineNodes}
+        unscheduledEvents={unscheduledEvents}
+        cashAtMonthStart={cashAtMonthStart}
+        daysInMonth={daysInMonth}
+        currentMonth={currentMonth}
+        selectedDay={selectedDay}
+        onSelectDay={setSelectedDay}
+      />
 
       {/* Summary strip */}
       <div className="mb-4 px-5 py-3 bg-cream-deep/60 border border-line rounded-[4px] flex flex-wrap gap-x-5 gap-y-1 text-[12px]">
