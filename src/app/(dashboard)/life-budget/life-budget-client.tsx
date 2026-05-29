@@ -3297,10 +3297,6 @@ function CashTimeline({
   selectedDay: number | null;
   onSelectDay: (day: number | null) => void;
 }) {
-  const PX_PER_DAY = 16;
-  const MIN_GAP = 28;
-  const gap = (days: number) => Math.max(MIN_GAP, days * PX_PER_DAY);
-
   const scheduledEnd = nodes.length > 0 ? nodes[nodes.length - 1].balanceAfter : cashAtMonthStart;
   const unschedNet = unscheduledEvents.reduce((a, e) => a + (e.type === "income" ? e.amount : -e.amount), 0);
   const finalEnd = scheduledEnd + unschedNet;
@@ -3310,10 +3306,12 @@ function CashTimeline({
   const txtCol = (bal: number) => bal >= 0 ? "text-sage" : "text-burgundy";
 
   const Connector = ({ fromBal, days }: { fromBal: number; days: number }) => {
-    const w = gap(days);
     const c = lineCol(fromBal);
     return (
-      <div className="flex flex-col items-center justify-center shrink-0 relative" style={{ width: w }}>
+      <div
+        className="flex flex-col items-center justify-center relative min-w-[28px]"
+        style={{ flexGrow: Math.max(1, days), flexBasis: 0 }}
+      >
         <div className="text-[9px] font-mono text-ink-soft/40 mb-1.5 h-3 leading-none text-center">
           {days > 1 ? `${days}d` : ""}
         </div>
@@ -3340,8 +3338,8 @@ function CashTimeline({
   );
 
   return (
-    <div className="mb-5 overflow-x-auto pb-1">
-      <div className="flex items-center min-w-max py-2 px-1">
+    <div className="mb-5">
+      <div className="flex flex-wrap items-center gap-y-3 py-2 px-1">
         <Cap label="Start" amount={cashAtMonthStart} />
 
         {nodes.length === 0 && !unscheduledEvents.length ? (
@@ -3361,7 +3359,7 @@ function CashTimeline({
                   <Connector fromBal={node.balanceBefore} days={node.day - prevDay} />
                   <div
                     onClick={() => onSelectDay(isSelected ? null : node.day)}
-                    className={`shrink-0 cursor-pointer rounded-[6px] border transition-all min-w-[128px] max-w-[160px] p-2.5
+                    className={`shrink-0 cursor-pointer rounded-[6px] border transition-all min-w-[112px] max-w-[160px] p-2.5
                       ${isSelected
                         ? "border-ink bg-ink text-cream shadow-lg scale-[1.03] z-10 relative"
                         : "border-line bg-paper hover:border-ink/30 hover:shadow-soft"
