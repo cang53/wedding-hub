@@ -787,7 +787,7 @@ export function LifeBudgetClient({
           expenses={expenses}
           purchases={purchases}
           settings={settings}
-          startingCash={startingCash}
+          startingCash={weddingCashOnHand}
           projection={projection}
           onAssignDay={handleAssignDay}
         />
@@ -3510,16 +3510,26 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, pro
   const unscheduledEvents = useMemo(() => allEvents.filter((e) => e.day === null), [allEvents]);
 
   const cashAtMonthStart = useMemo(() => {
-    const idx = projection.findIndex((p) => p.month === currentMonth);
-    if (idx === 0) return startingCash;
-    if (idx > 0) return projection[idx - 1].cumulative;
+    // Recompute from startingCash (= weddingCashOnHand) directly — do not rely on
+    // projection which may have been built from a different base value.
     let cash = startingCash;
-    for (const p of projection) {
-      if (p.month >= currentMonth) break;
-      cash = p.cumulative;
+    const allMonths = monthsList(settings.start_month, settings.horizon_months);
+    for (const month of allMonths) {
+      if (month >= currentMonth) break;
+      income.forEach((i) => {
+        if (isActiveInMonth(i.start_month, i.end_month, month)) cash += Number(i.amount);
+      });
+      expenses.forEach((e) => {
+        if (isActiveInMonth(e.start_month, e.end_month, month)) cash -= Number(e.amount);
+      });
+      purchases.forEach((p) => {
+        if (p.scheduled && p.target_month === month) {
+          cash -= Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0));
+        }
+      });
     }
     return cash;
-  }, [currentMonth, projection, startingCash]);
+  }, [currentMonth, income, expenses, purchases, settings, startingCash]);
 
   const timelineNodes = useMemo((): TLNode[] => {
     const map = new Map<number, (CalEv & { day: number })[]>();
