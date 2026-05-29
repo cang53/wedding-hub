@@ -28,12 +28,14 @@ function parseIncome(form: FormData) {
   const start_month = trimMonth(form.get("start_month"));
   const end_month = trimMonth(form.get("end_month"));
   const notes = String(form.get("notes") ?? "").trim() || null;
+  const rawDay = parseInt(String(form.get("day_of_month") ?? ""), 10);
+  const day_of_month = !isNaN(rawDay) && rawDay >= 1 && rawDay <= 31 ? rawDay : null;
 
   if (!name) return { error: "Please enter a name." };
   if (isNaN(amount) || amount < 0) return { error: "Please enter a valid amount." };
   if (!VALID_PERSONS.includes(person)) return { error: "Invalid person." };
 
-  return { name, amount, person, start_month, end_month, notes };
+  return { name, amount, person, start_month, end_month, day_of_month, notes };
 }
 
 export async function createIncome(_prev: unknown, form: FormData) {
@@ -54,9 +56,11 @@ export async function updateIncome(id: string, _prev: unknown, form: FormData) {
   return { ok: true as const, data };
 }
 
-export async function deleteIncome(id: string) {
+export async function deleteIncome(id: string): Promise<{ error?: string }> {
   const supabase = createSupabaseServerClient();
-  await supabase.from("life_income").delete().eq("id", id);
+  const { error } = await supabase.from("life_income").delete().eq("id", id);
+  if (error) return { error: error.message };
+  return {};
 }
 
 // ---- Recurring expenses --------------------------------------------------
@@ -82,6 +86,8 @@ function parseExpense(form: FormData) {
   const notes = String(form.get("notes") ?? "").trim() || null;
   const { payer, payer_groom_pct } = parsePayerSplit(form);
   const expense_type = String(form.get("expense_type") ?? "fixed") as ExpenseType;
+  const rawDay = parseInt(String(form.get("day_of_month") ?? ""), 10);
+  const day_of_month = !isNaN(rawDay) && rawDay >= 1 && rawDay <= 31 ? rawDay : null;
 
   if (!name) return { error: "Please enter a name." };
   if (!VALID_PERSONS.includes(payer)) return { error: "Invalid payer." };
@@ -108,6 +114,7 @@ function parseExpense(form: FormData) {
       credit_total,
       credit_months,
       credit_interest_rate,
+      day_of_month,
     };
   }
 
@@ -123,6 +130,7 @@ function parseExpense(form: FormData) {
     expense_type,
     start_month, end_month,
     credit_total: null, credit_months: null, credit_interest_rate: null,
+    day_of_month,
     notes,
   };
 }
@@ -145,9 +153,11 @@ export async function updateExpense(id: string, _prev: unknown, form: FormData) 
   return { ok: true as const, data };
 }
 
-export async function deleteExpense(id: string) {
+export async function deleteExpense(id: string): Promise<{ error?: string }> {
   const supabase = createSupabaseServerClient();
-  await supabase.from("life_expenses").delete().eq("id", id);
+  const { error } = await supabase.from("life_expenses").delete().eq("id", id);
+  if (error) return { error: error.message };
+  return {};
 }
 
 // ---- One-time purchases --------------------------------------------------
@@ -161,6 +171,8 @@ function parsePurchase(form: FormData) {
   const notes = String(form.get("notes") ?? "").trim() || null;
   const scheduled = String(form.get("scheduled") ?? "true") !== "false";
   const { payer, payer_groom_pct } = parsePayerSplit(form);
+  const rawDay = parseInt(String(form.get("day_of_month") ?? ""), 10);
+  const day_of_month = !isNaN(rawDay) && rawDay >= 1 && rawDay <= 31 ? rawDay : null;
 
   if (!name) return { error: "Please enter a name." };
   if (isNaN(amount) || amount < 0) return { error: "Please enter a valid amount." };
@@ -168,7 +180,7 @@ function parsePurchase(form: FormData) {
   if (!target_month) return { error: "Please select a target month." };
   if (!VALID_PERSONS.includes(payer)) return { error: "Invalid payer." };
 
-  return { name, amount, already_paid, category, target_month, payer, payer_groom_pct, scheduled, notes };
+  return { name, amount, already_paid, category, target_month, payer, payer_groom_pct, scheduled, day_of_month, notes };
 }
 
 export async function createPurchase(_prev: unknown, form: FormData) {
@@ -201,9 +213,11 @@ export async function togglePurchaseScheduled(id: string, scheduled: boolean) {
   return { ok: true as const, data };
 }
 
-export async function deletePurchase(id: string) {
+export async function deletePurchase(id: string): Promise<{ error?: string }> {
   const supabase = createSupabaseServerClient();
-  await supabase.from("life_purchases").delete().eq("id", id);
+  const { error } = await supabase.from("life_purchases").delete().eq("id", id);
+  if (error) return { error: error.message };
+  return {};
 }
 
 // ---- Settings ------------------------------------------------------------

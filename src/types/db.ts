@@ -145,6 +145,7 @@ export interface LifeIncomeRow {
   person: LifePerson;
   start_month: string | null;
   end_month: string | null;
+  day_of_month: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -163,6 +164,7 @@ export interface LifeExpenseRow {
   credit_total: number | null;
   credit_months: number | null;
   credit_interest_rate: number | null;
+  day_of_month: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -178,6 +180,7 @@ export interface LifePurchaseRow {
   payer: LifePerson;
   payer_groom_pct: number | null;
   scheduled: boolean;
+  day_of_month: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -449,6 +452,7 @@ export type Database = {
           person?: LifePerson;
           start_month?: string | null;
           end_month?: string | null;
+          day_of_month?: number | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -460,6 +464,7 @@ export type Database = {
           person?: LifePerson;
           start_month?: string | null;
           end_month?: string | null;
+          day_of_month?: number | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -481,6 +486,7 @@ export type Database = {
           credit_total?: number | null;
           credit_months?: number | null;
           credit_interest_rate?: number | null;
+          day_of_month?: number | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -498,6 +504,7 @@ export type Database = {
           credit_total?: number | null;
           credit_months?: number | null;
           credit_interest_rate?: number | null;
+          day_of_month?: number | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -516,6 +523,7 @@ export type Database = {
           payer?: LifePerson;
           payer_groom_pct?: number | null;
           scheduled?: boolean;
+          day_of_month?: number | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -530,6 +538,7 @@ export type Database = {
           payer?: LifePerson;
           payer_groom_pct?: number | null;
           scheduled?: boolean;
+          day_of_month?: number | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;

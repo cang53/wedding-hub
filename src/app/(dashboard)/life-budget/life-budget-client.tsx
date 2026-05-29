@@ -208,8 +208,10 @@ export function LifeBudgetClient({
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [expandedSavingsOpen, setExpandedSavingsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [view, setView] = useState<"joint" | "groom" | "bride">("joint");
+  const [view, setView] = useState<LifeView>("joint");
   const [expandedSection, setExpandedSection] = useState<"income" | "expense" | "purchase" | null>(null);
+  const [confirmState, setConfirmState] = useState<{ open: boolean; title: string; onConfirm: () => void }>({ open: false, title: "", onConfirm: () => {} });
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
   const [, startTransition] = useTransition();
 
@@ -310,19 +312,52 @@ export function LifeBudgetClient({
 
   // ---- Action handlers ----------------------------------------------------
   const handleDeleteIncome = (item: LifeIncomeRow) => {
-    if (!confirm(`Delete "${item.name}"?`)) return;
-    setIncome((prev) => prev.filter((i) => i.id !== item.id));
-    startTransition(() => { deleteIncome(item.id); });
+    setErrorBanner(null);
+    setConfirmState({
+      open: true,
+      title: `Delete "${item.name}"?`,
+      onConfirm: () => {
+        const prev = income;
+        setIncome((p) => p.filter((i) => i.id !== item.id));
+        setConfirmState((s) => ({ ...s, open: false }));
+        startTransition(async () => {
+          const res = await deleteIncome(item.id);
+          if (res?.error) { setIncome(prev); setErrorBanner(res.error); }
+        });
+      },
+    });
   };
   const handleDeleteExpense = (item: LifeExpenseRow) => {
-    if (!confirm(`Delete "${item.name}"?`)) return;
-    setExpenses((prev) => prev.filter((i) => i.id !== item.id));
-    startTransition(() => { deleteExpense(item.id); });
+    setErrorBanner(null);
+    setConfirmState({
+      open: true,
+      title: `Delete "${item.name}"?`,
+      onConfirm: () => {
+        const prev = expenses;
+        setExpenses((p) => p.filter((i) => i.id !== item.id));
+        setConfirmState((s) => ({ ...s, open: false }));
+        startTransition(async () => {
+          const res = await deleteExpense(item.id);
+          if (res?.error) { setExpenses(prev); setErrorBanner(res.error); }
+        });
+      },
+    });
   };
   const handleDeletePurchase = (item: LifePurchaseRow) => {
-    if (!confirm(`Delete "${item.name}"?`)) return;
-    setPurchases((prev) => prev.filter((i) => i.id !== item.id));
-    startTransition(() => { deletePurchase(item.id); });
+    setErrorBanner(null);
+    setConfirmState({
+      open: true,
+      title: `Delete "${item.name}"?`,
+      onConfirm: () => {
+        const prev = purchases;
+        setPurchases((p) => p.filter((i) => i.id !== item.id));
+        setConfirmState((s) => ({ ...s, open: false }));
+        startTransition(async () => {
+          const res = await deletePurchase(item.id);
+          if (res?.error) { setPurchases(prev); setErrorBanner(res.error); }
+        });
+      },
+    });
   };
   const handleToggleScheduled = (item: LifePurchaseRow) => {
     const next = !item.scheduled;
@@ -330,9 +365,19 @@ export function LifeBudgetClient({
     startTransition(() => { togglePurchaseScheduled(item.id, next); });
   };
   const handleDeleteSaving = (item: WeddingSavingsRow) => {
-    if (!confirm(`Delete this entry of ${formatMoney(item.amount)}?`)) return;
-    setSavings((prev) => prev.filter((i) => i.id !== item.id));
-    startTransition(() => { deleteSavingEntry(item.id); });
+    setErrorBanner(null);
+    setConfirmState({
+      open: true,
+      title: `Delete savings entry of ${formatMoney(item.amount)}?`,
+      onConfirm: () => {
+        const prev = savings;
+        setSavings((p) => p.filter((i) => i.id !== item.id));
+        setConfirmState((s) => ({ ...s, open: false }));
+        startTransition(async () => {
+          await deleteSavingEntry(item.id);
+        });
+      },
+    });
   };
 
   // ---- Preview slices (3 most recent / soonest) --------------------------
@@ -384,6 +429,13 @@ export function LifeBudgetClient({
           </span>
         </span>
       </div>
+
+      {errorBanner && (
+        <div className="mb-4 px-5 py-3 bg-burgundy/10 border border-burgundy/30 rounded-[4px] flex items-center justify-between text-[12px] text-burgundy">
+          <span>{errorBanner}</span>
+          <button type="button" onClick={() => setErrorBanner(null)} className="ml-4 text-[16px] leading-none opacity-70 hover:opacity-100">×</button>
+        </div>
+      )}
 
       <ViewSwitcher view={view} onChange={setView} />
 
@@ -507,6 +559,7 @@ export function LifeBudgetClient({
         <SectionCard
           title="One-time purchases"
           emoji="🛋️"
+          emojiTitle="Check to include / uncheck to exclude from projection"
           accent="gold"
           empty="Plan furniture, appliances, big buys."
           totalCount={purchases.length}
@@ -716,6 +769,30 @@ export function LifeBudgetClient({
           onAdd={() => setSavingsDialog({ open: true, editing: null })}
         />
       )}
+
+      {view === "calendar" && (
+        <CalendarView
+          income={income}
+          expenses={expenses}
+          purchases={purchases}
+          settings={settings}
+          startingCash={startingCash}
+          projection={projection}
+        />
+      )}
+
+      <Dialog open={confirmState.open} onOpenChange={(o) => setConfirmState((s) => ({ ...s, open: o }))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm delete</DialogTitle>
+            <DialogDescription>{confirmState.title}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setConfirmState((s) => ({ ...s, open: false }))}>Cancel</Button>
+            <Button type="button" className="bg-burgundy text-cream hover:bg-burgundy/90" onClick={confirmState.onConfirm}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
@@ -1727,13 +1804,14 @@ function Legend({ swatch, label }: { swatch: string; label: string }) {
 // View switcher — Household / Groom / Bride
 // ============================================================================
 
-type LifeView = "joint" | "groom" | "bride";
+type LifeView = "joint" | "groom" | "bride" | "calendar";
 
 function ViewSwitcher({ view, onChange }: { view: LifeView; onChange: (v: LifeView) => void }) {
   const tabs: { value: LifeView; label: string; sub: string; activeClass: string }[] = [
     { value: "joint", label: "Household", sub: "Combined finances", activeClass: "border-ink text-ink" },
     { value: "groom", label: "Groom", sub: "Personal finances", activeClass: "border-sage text-sage" },
     { value: "bride", label: "Bride", sub: "Personal finances", activeClass: "border-rose text-rose" },
+    { value: "calendar", label: "Calendar", sub: "Day-by-day", activeClass: "border-gold text-gold" },
   ];
   return (
     <div className="flex gap-0 mb-8 border border-line rounded-[6px] overflow-hidden bg-cream-deep/40">
@@ -1878,10 +1956,11 @@ type SectionItem = {
 };
 
 function SectionCard({
-  title, emoji, accent, empty, items, onAdd, totalCount, onViewAll,
+  title, emoji, emojiTitle, accent, empty, items, onAdd, totalCount, onViewAll,
 }: {
   title: string;
   emoji: string;
+  emojiTitle?: string;
   accent: "sage" | "burgundy" | "gold";
   empty: string;
   items: SectionItem[];
@@ -1896,7 +1975,7 @@ function SectionCard({
     <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] shadow-soft flex flex-col`}>
       <div className="flex items-center justify-between px-5 py-4 border-b border-line">
         <div className="flex items-center gap-2">
-          <span className="text-[16px]">{emoji}</span>
+          <span className="text-[16px]" title={emojiTitle}>{emoji}</span>
           <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">{title}</span>
           {totalCount !== undefined && totalCount > 0 && (
             <span className="text-[10px] bg-cream-deep text-ink-soft rounded-full px-1.5 py-0.5 font-mono">{totalCount}</span>
@@ -1921,7 +2000,7 @@ function SectionCard({
                     onClick={it.onToggle}
                     className={`w-3.5 h-3.5 rounded-sm border shrink-0 transition-colors ${it.toggled ? "bg-gold border-gold" : "bg-transparent border-line"}`}
                     aria-label={it.toggled ? "Disable" : "Enable"}
-                    title={it.toggled ? "Scheduled — click to exclude from projection" : "Excluded — click to include"}
+                    title={it.toggled ? "Included in projection — click to exclude" : "Excluded from projection — click to include"}
                   />
                 )}
                 <button
@@ -2032,7 +2111,7 @@ function IncomeDialog({
               <SelectField name="person" defaultValue={editing?.person ?? "groom"} options={PERSON_OPTIONS} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
+          <div className="grid grid-cols-3 gap-3.5 max-md:grid-cols-1">
             <div className="flex flex-col gap-2">
               <Label>Starts (optional)</Label>
               <MonthSelect name="start_month" defaultValue={editing?.start_month ?? ""} />
@@ -2040,6 +2119,10 @@ function IncomeDialog({
             <div className="flex flex-col gap-2">
               <Label>Ends (optional)</Label>
               <MonthSelect name="end_month" defaultValue={editing?.end_month ?? ""} />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="income-dom">Day of month (1–31, optional)</Label>
+              <Input id="income-dom" name="day_of_month" type="number" min="1" max="31" defaultValue={editing?.day_of_month ?? ""} placeholder="e.g. 25" />
             </div>
           </div>
           <div className="flex flex-col gap-2">
@@ -2248,6 +2331,12 @@ function ExpenseDialog({
             )}
           </div>
 
+          <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="expense-dom">Day of month (1–31, optional)</Label>
+              <Input id="expense-dom" name="day_of_month" type="number" min="1" max="31" defaultValue={editing?.day_of_month ?? ""} placeholder="e.g. 25" />
+            </div>
+          </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="notes">Notes (optional)</Label>
             <Textarea id="notes" name="notes" defaultValue={editing?.notes ?? ""} rows={2} />
@@ -2346,9 +2435,15 @@ function PurchaseDialog({
               options={PURCHASE_CATEGORIES.map((c) => ({ value: c, label: c }))}
             />
           </div>
-          <div className="flex flex-col gap-2">
-            <Label>Target month</Label>
-            <MonthSelect name="target_month" defaultValue={editing?.target_month ?? defaultMonth} required />
+          <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
+            <div className="flex flex-col gap-2">
+              <Label>Target month</Label>
+              <MonthSelect name="target_month" defaultValue={editing?.target_month ?? defaultMonth} required />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="purchase-dom">Day of month (optional)</Label>
+              <Input id="purchase-dom" name="day_of_month" type="number" min="1" max="31" defaultValue={editing?.day_of_month ?? ""} placeholder="e.g. 25" />
+            </div>
           </div>
           <div className={`grid gap-3.5 max-md:grid-cols-1 ${payer === "both" ? "grid-cols-2" : "grid-cols-1"}`}>
             <div className="flex flex-col gap-2">
@@ -3163,6 +3258,221 @@ function ExpandedSavingsDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ============================================================================
+// CalendarView
+// ============================================================================
+
+interface CalendarViewProps {
+  income: LifeIncomeRow[];
+  expenses: LifeExpenseRow[];
+  purchases: LifePurchaseRow[];
+  settings: LifeSettingsRow;
+  startingCash: number;
+  projection: Array<{ month: string; income: number; fixed: number; purchases: number; net: number; cumulative: number }>;
+}
+
+function CalendarView({ income, expenses, purchases, settings, startingCash, projection }: CalendarViewProps) {
+  const [currentMonth, setCurrentMonth] = useState(settings.start_month);
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
+
+  const maxMonth = useMemo(() => {
+    if (projection.length > 0) return projection[projection.length - 1].month;
+    const d = monthToDate(settings.start_month);
+    d.setMonth(d.getMonth() + settings.horizon_months - 1);
+    return dateToMonth(d);
+  }, [projection, settings]);
+
+  const goMonth = (dir: 1 | -1) => {
+    const d = monthToDate(currentMonth);
+    d.setMonth(d.getMonth() + dir);
+    const next = dateToMonth(d);
+    if (next < settings.start_month || next > maxMonth) return;
+    setCurrentMonth(next);
+    setSelectedDay(null);
+  };
+
+  const events = useMemo(() => {
+    const out: { id: string; type: "income" | "expense" | "purchase"; name: string; amount: number; day: number }[] = [];
+    income.forEach((i) => {
+      if (isActiveInMonth(i.start_month, i.end_month, currentMonth))
+        out.push({ id: i.id, type: "income", name: i.name, amount: Number(i.amount), day: i.day_of_month ?? 1 });
+    });
+    expenses.forEach((e) => {
+      if (isActiveInMonth(e.start_month, e.end_month, currentMonth))
+        out.push({ id: e.id, type: "expense", name: e.name, amount: Number(e.amount), day: e.day_of_month ?? 1 });
+    });
+    purchases.forEach((p) => {
+      if (p.scheduled && p.target_month === currentMonth)
+        out.push({ id: p.id, type: "purchase", name: p.name, amount: Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)), day: p.day_of_month ?? 15 });
+    });
+    return out;
+  }, [currentMonth, income, expenses, purchases]);
+
+  const cashAtMonthStart = useMemo(() => {
+    const idx = projection.findIndex((p) => p.month === currentMonth);
+    if (idx === 0) return startingCash;
+    if (idx > 0) return projection[idx - 1].cumulative;
+    // Before or beyond horizon — compute by summing
+    let cash = startingCash;
+    for (const p of projection) {
+      if (p.month >= currentMonth) break;
+      cash = p.cumulative;
+    }
+    return cash;
+  }, [currentMonth, projection, startingCash]);
+
+  const [y, m] = currentMonth.split("-").map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+
+  const dailyBalances = useMemo(() => {
+    const arr: number[] = Array(daysInMonth + 1).fill(0);
+    let cash = cashAtMonthStart;
+    for (let d = 1; d <= daysInMonth; d++) {
+      events.filter((e) => e.day === d).forEach((ev) => {
+        cash += ev.type === "income" ? ev.amount : -ev.amount;
+      });
+      arr[d] = cash;
+    }
+    return arr;
+  }, [events, cashAtMonthStart, daysInMonth]);
+
+  const monthTotals = useMemo(() => {
+    const inc = events.filter((e) => e.type === "income").reduce((a, e) => a + e.amount, 0);
+    const exp = events.filter((e) => e.type === "expense").reduce((a, e) => a + e.amount, 0);
+    const pur = events.filter((e) => e.type === "purchase").reduce((a, e) => a + e.amount, 0);
+    return { inc, exp, pur, end: cashAtMonthStart + inc - exp - pur };
+  }, [events, cashAtMonthStart]);
+
+  const firstDayOfWeek = new Date(y, m - 1, 1).getDay(); // 0=Sun
+  const leadingCells = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1; // Monday-first grid
+
+  const todayStr = dateToMonth(new Date());
+  const todayDay = todayStr === currentMonth ? new Date().getDate() : null;
+
+  const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+  return (
+    <div className="animate-in fade-in duration-200">
+      {/* Navigation */}
+      <div className="flex items-center justify-between mb-4">
+        <button
+          type="button"
+          onClick={() => goMonth(-1)}
+          disabled={currentMonth <= settings.start_month}
+          className="px-3 py-1.5 text-[13px] border border-line rounded-[4px] hover:bg-cream/60 disabled:opacity-30 disabled:cursor-not-allowed"
+        >← Prev</button>
+        <div className="font-serif text-[22px] text-ink">
+          {monthToDate(currentMonth).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}
+        </div>
+        <button
+          type="button"
+          onClick={() => goMonth(1)}
+          disabled={currentMonth >= maxMonth}
+          className="px-3 py-1.5 text-[13px] border border-line rounded-[4px] hover:bg-cream/60 disabled:opacity-30 disabled:cursor-not-allowed"
+        >Next →</button>
+      </div>
+
+      {/* Summary strip */}
+      <div className="mb-4 px-5 py-3 bg-cream-deep/60 border border-line rounded-[4px] flex flex-wrap gap-x-5 gap-y-1 text-[12px]">
+        <span className="text-ink-soft">Starting <strong className="font-mono text-ink">{formatMoney(cashAtMonthStart)}</strong></span>
+        <span className="text-sage">Income <strong className="font-mono">+{formatMoney(monthTotals.inc)}</strong></span>
+        <span className="text-burgundy">Expenses <strong className="font-mono">−{formatMoney(monthTotals.exp)}</strong></span>
+        {monthTotals.pur > 0 && <span className="text-gold">Purchases <strong className="font-mono">−{formatMoney(monthTotals.pur)}</strong></span>}
+        <span className={monthTotals.end >= cashAtMonthStart ? "text-sage" : "text-burgundy"}>
+          Ending <strong className="font-mono">{formatMoney(monthTotals.end)}</strong>
+        </span>
+      </div>
+
+      {/* Calendar grid */}
+      <div className="bg-paper border border-line rounded-[4px] overflow-hidden shadow-soft">
+        {/* Day headers */}
+        <div className="grid grid-cols-7 border-b border-line">
+          {DAY_LABELS.map((d) => (
+            <div key={d} className="py-2 text-center text-[10px] uppercase tracking-[0.2em] text-ink-soft font-medium">{d}</div>
+          ))}
+        </div>
+
+        {/* Day cells */}
+        <div className="grid grid-cols-7">
+          {Array(leadingCells).fill(null).map((_, i) => (
+            <div key={"lead-" + i} className="min-h-[80px] border-r border-b border-line/50 bg-cream/20" />
+          ))}
+          {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
+            const dayEvents = events.filter((e) => e.day === day);
+            const bal = dailyBalances[day];
+            const isToday = day === todayDay;
+            const isSelected = day === selectedDay;
+            const isNegativeBal = bal < 0 && dayEvents.length > 0;
+            return (
+              <div
+                key={day}
+                onClick={() => setSelectedDay(isSelected ? null : day)}
+                className={`min-h-[80px] border-r border-b border-line/50 p-1.5 cursor-pointer transition-colors
+                  ${isSelected ? "bg-cream-deep" : isNegativeBal ? "bg-burgundy/5 hover:bg-burgundy/10" : "hover:bg-cream/60"}
+                  ${isToday ? "ring-2 ring-ink/20 ring-inset" : ""}
+                `}
+              >
+                <div className={`text-right text-[11px] mb-1 ${isToday ? "font-bold text-ink" : "text-ink-soft/60"}`}>{day}</div>
+                <div className="space-y-0.5">
+                  {dayEvents.map((ev) => (
+                    <div key={ev.id} className={`rounded px-1 py-0.5 text-[9px] leading-tight border truncate
+                      ${ev.type === "income" ? "bg-sage/15 text-sage border-sage/30" : ev.type === "expense" ? "bg-burgundy/10 text-burgundy border-burgundy/20" : "bg-gold/15 text-gold border-gold/30"}
+                    `}>
+                      <div className="truncate font-medium">{ev.name}</div>
+                      <div className="font-mono">{ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}</div>
+                    </div>
+                  ))}
+                </div>
+                {dayEvents.length > 0 && (
+                  <div className={`mt-1 text-right font-mono text-[9px] ${bal >= 0 ? "text-sage" : "text-burgundy"}`}>{formatMoney(bal)}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Selected day detail */}
+      {selectedDay !== null && (() => {
+        const dayEvents = events.filter((e) => e.day === selectedDay);
+        const openBal = selectedDay === 1 ? cashAtMonthStart : dailyBalances[selectedDay - 1];
+        const closeBal = dailyBalances[selectedDay];
+        const date = new Date(y, m - 1, selectedDay);
+        const dateLabel = date.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+        return (
+          <div className="mt-4 bg-paper border border-line rounded-[4px] shadow-soft p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="font-serif text-[18px] text-ink">{dateLabel}</div>
+              <button type="button" onClick={() => setSelectedDay(null)} className="text-ink-soft hover:text-ink text-[20px] leading-none">×</button>
+            </div>
+            <div className="space-y-1 mb-4">
+              <div className="flex justify-between text-[12px] text-ink-soft pb-2 border-b border-line">
+                <span>Opening balance</span>
+                <span className="font-mono text-ink">{formatMoney(openBal)}</span>
+              </div>
+              {dayEvents.length === 0 ? (
+                <p className="text-[13px] italic text-ink-soft py-3">No events this day.</p>
+              ) : dayEvents.map((ev) => (
+                <div key={ev.id} className="flex items-center gap-3 py-1.5 text-[13px]">
+                  <span className="text-[16px]">{ev.type === "income" ? "💼" : ev.type === "expense" ? "🔁" : "🛋️"}</span>
+                  <span className="flex-1 text-ink">{ev.name}</span>
+                  <span className={`font-mono ${ev.type === "income" ? "text-sage" : "text-burgundy"}`}>
+                    {ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}
+                  </span>
+                </div>
+              ))}
+              <div className="flex justify-between text-[13px] font-medium pt-2 border-t border-line">
+                <span>Closing balance</span>
+                <span className={`font-mono font-bold ${closeBal >= 0 ? "text-sage" : "text-burgundy"}`}>{formatMoney(closeBal)}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
   );
 }
 
