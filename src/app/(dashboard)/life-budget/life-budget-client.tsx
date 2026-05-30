@@ -2116,7 +2116,7 @@ function IncomeDialog({
           <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
             <div className="flex flex-col gap-2">
               <Label htmlFor="amount">Monthly amount (€)</Label>
-              <Input id="amount" name="amount" type="number" min="0" step="1" defaultValue={editing?.amount ?? ""} required />
+              <Input id="amount" name="amount" type="number" min="0" step="any" defaultValue={editing?.amount ?? ""} required />
             </div>
             <div className="flex flex-col gap-2">
               <Label>Earned by</Label>
@@ -2233,7 +2233,7 @@ function ExpenseDialog({
               <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="amount">Monthly amount (€)</Label>
-                  <Input id="amount" name="amount" type="number" min="0" step="1" defaultValue={editing?.amount ?? ""} required />
+                  <Input id="amount" name="amount" type="number" min="0" step="any" defaultValue={editing?.amount ?? ""} required />
                 </div>
                 <div className="flex flex-col gap-2">
                   <Label>Category</Label>
@@ -2261,7 +2261,7 @@ function ExpenseDialog({
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="credit_total">Total amount (€)</Label>
                   <Input
-                    id="credit_total" name="credit_total" type="number" min="0" step="100"
+                    id="credit_total" name="credit_total" type="number" min="0" step="any"
                     value={creditTotal || ""}
                     onChange={(e) => setCreditTotal(parseFloat(e.target.value) || 0)}
                     required
@@ -2410,14 +2410,14 @@ function PurchaseDialog({
           <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
             <div className="flex flex-col gap-2">
               <Label htmlFor="amount">Total cost (€)</Label>
-              <Input id="amount" name="amount" type="number" min="0" step="1"
+              <Input id="amount" name="amount" type="number" min="0" step="any"
                 value={totalCost || ""}
                 onChange={(e) => setTotalCost(parseFloat(e.target.value) || 0)}
                 required />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="already_paid">Already paid (€)</Label>
-              <Input id="already_paid" name="already_paid" type="number" min="0" step="1"
+              <Input id="already_paid" name="already_paid" type="number" min="0" step="any"
                 value={alreadyPaid || ""}
                 onChange={(e) => setAlreadyPaid(parseFloat(e.target.value) || 0)}
                 placeholder="0" />
@@ -3039,7 +3039,7 @@ function SavingsDialog({
           <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
             <div className="flex flex-col gap-2">
               <Label htmlFor="s-amount">Amount (€)</Label>
-              <Input id="s-amount" name="amount" type="number" min="0" step="1" defaultValue={editing?.amount ?? ""} placeholder="500" required autoFocus />
+              <Input id="s-amount" name="amount" type="number" min="0" step="any" defaultValue={editing?.amount ?? ""} placeholder="500" required autoFocus />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="s-date">Date</Label>
@@ -3138,7 +3138,7 @@ function TransferDialog({
           <div className="grid grid-cols-2 gap-3.5">
             <div className="flex flex-col gap-2">
               <Label htmlFor="tr-amount">Amount (€)</Label>
-              <Input id="tr-amount" name="amount" type="number" min="0" step="1" placeholder="5000" required autoFocus />
+              <Input id="tr-amount" name="amount" type="number" min="0" step="any" placeholder="5000" required autoFocus />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="tr-date">Date</Label>
@@ -3876,7 +3876,7 @@ function SettingsDialog({
               name="starting_cash_manual"
               type="number"
               min="0"
-              step="100"
+              step="any"
               defaultValue={settings.starting_cash_manual ?? 0}
               disabled={mode === "from_wedding"}
             />
