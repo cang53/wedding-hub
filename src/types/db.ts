@@ -35,7 +35,7 @@ export type ApartmentStatus = "interested" | "visited" | "applied" | "rejected";
 export type SavingsContributor = "bride" | "groom" | "both";
 
 export type LifePerson = "bride" | "groom" | "both";
-/** Who pays a recurring expense. "gift" (covered by someone else) and "free"
+/** Who pays an expense or purchase. "gift" (covered by someone else) and "free"
  *  both mean it costs the couple nothing, so they don't affect the projection. */
 export type ExpensePayer = LifePerson | "gift" | "free";
 export type StartingCashMode = "manual" | "from_wedding";
@@ -180,7 +180,7 @@ export interface LifePurchaseRow {
   already_paid: number;
   category: string | null;
   target_month: string;
-  payer: LifePerson;
+  payer: ExpensePayer;
   payer_groom_pct: number | null;
   scheduled: boolean;
   day_of_month: number | null;
@@ -537,7 +537,7 @@ export type Database = {
           already_paid?: number;
           category?: string | null;
           target_month: string;
-          payer?: LifePerson;
+          payer?: ExpensePayer;
           payer_groom_pct?: number | null;
           scheduled?: boolean;
           day_of_month?: number | null;
@@ -553,7 +553,7 @@ export type Database = {
           already_paid?: number;
           category?: string | null;
           target_month?: string;
-          payer?: LifePerson;
+          payer?: ExpensePayer;
           payer_groom_pct?: number | null;
           scheduled?: boolean;
           day_of_month?: number | null;

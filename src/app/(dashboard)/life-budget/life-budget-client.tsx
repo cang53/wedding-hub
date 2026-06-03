@@ -274,7 +274,7 @@ export function LifeBudgetClient({
         .reduce((a, e) => a + (isExternalPayer(e.payer) ? 0 : Number(e.amount)), 0);
 
       const monthPurchases = purchases
-        .filter((p) => p.scheduled && p.target_month === month)
+        .filter((p) => p.scheduled && p.target_month === month && !isExternalPayer(p.payer))
         .reduce((a, p) => a + Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)), 0);
 
       const totalOut = monthFixed + monthPurchases;
@@ -620,8 +620,12 @@ export function LifeBudgetClient({
               secondary: (paid > 0
                 ? `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${formatMoney(paid)} paid of ${formatMoney(p.amount)} · ${payerLabel(p.payer, p.payer_groom_pct)}`
                 : `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${payerLabel(p.payer, p.payer_groom_pct)}`) + optionsSuffix(p),
-              value: paid > 0 ? `−${formatMoney(remaining)}` : `−${formatMoney(p.amount)}`,
-              valueClass: p.scheduled ? (remaining === 0 ? "text-sage" : "text-burgundy") : "text-ink-soft line-through",
+              value: isExternalPayer(p.payer)
+                ? formatMoney(p.amount)
+                : (paid > 0 ? `−${formatMoney(remaining)}` : `−${formatMoney(p.amount)}`),
+              valueClass: isExternalPayer(p.payer)
+                ? "text-ink-soft"
+                : p.scheduled ? (remaining === 0 ? "text-sage" : "text-burgundy") : "text-ink-soft line-through",
               onClick: () => setPurchaseDialog({ open: true, editing: p }),
               onDelete: () => handleDeletePurchase(p),
               onToggle: () => handleToggleScheduled(p),
@@ -2445,7 +2449,7 @@ function PurchaseDialog({
     FormData
   >(action, null);
 
-  const [payer, setPayer] = useState<LifePerson>(editing?.payer ?? "both");
+  const [payer, setPayer] = useState<ExpensePayer>(editing?.payer ?? "both");
   const [totalCost, setTotalCost] = useState<number>(Number(editing?.amount ?? 0));
   const [alreadyPaid, setAlreadyPaid] = useState<number>(Number(editing?.already_paid ?? 0));
 
@@ -2585,10 +2589,10 @@ function PurchaseDialog({
             <div className="flex flex-col gap-2">
               <Label>Who pays?</Label>
               <input type="hidden" name="payer" value={payer} />
-              <Select value={payer} onValueChange={(v) => setPayer(v as LifePerson)}>
+              <Select value={payer} onValueChange={(v) => setPayer(v as ExpensePayer)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {PERSON_OPTIONS.map((o) => (
+                  {EXPENSE_PAYER_OPTIONS.map((o) => (
                     <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                   ))}
                 </SelectContent>
@@ -2601,6 +2605,11 @@ function PurchaseDialog({
               </div>
             )}
           </div>
+          {isExternalPayer(payer) && (
+            <p className="text-[12px] text-ink-soft italic -mt-1">
+              {payer === "gift" ? "Covered as a gift" : "This one's free"} — tracked for reference, but it won&rsquo;t reduce your savings.
+            </p>
+          )}
           <div className="flex items-center gap-2">
             <input type="hidden" name="scheduled" value={editing?.scheduled === false ? "false" : "true"} />
             <span className="text-[12px] text-ink-soft italic">
@@ -2998,6 +3007,8 @@ function ExpandedPurchasesDialog({ open, onOpenChange, purchases, onEdit, onDele
             <option value="groom">Groom</option>
             <option value="bride">Bride</option>
             <option value="both">Both</option>
+            <option value="gift">Gift</option>
+            <option value="free">Free</option>
           </select>
           <select value={scheduledFilter} onChange={(e) => setScheduledFilter(e.target.value)} className={filterSelect}>
             <option value="all">All</option>
@@ -3741,7 +3752,10 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
     });
     filteredPurchases.forEach((p) => {
       if (p.scheduled && p.target_month === currentMonth) {
-        const share = personFilter !== "all" ? personShare(p.payer, p.payer_groom_pct, personFilter) : 1;
+        const share = personFilter !== "all"
+          ? personShare(p.payer, p.payer_groom_pct, personFilter)
+          : (isExternalPayer(p.payer) ? 0 : 1);
+        if (share === 0) return;
         const rem = Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0));
         out.push({ id: p.id, type: "purchase", name: p.name, amount: rem * share, day: p.day_of_month ?? null });
       }
@@ -3780,7 +3794,9 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
       });
       filteredPurchases.forEach((p) => {
         if (p.scheduled && p.target_month === month) {
-          const share = personFilter !== "all" ? personShare(p.payer, p.payer_groom_pct, personFilter) : 1;
+          const share = personFilter !== "all"
+            ? personShare(p.payer, p.payer_groom_pct, personFilter)
+            : (isExternalPayer(p.payer) ? 0 : 1);
           cash -= Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)) * share;
         }
       });
