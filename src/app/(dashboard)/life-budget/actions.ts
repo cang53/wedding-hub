@@ -1,9 +1,11 @@
 "use server";
 
 import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
-import type { ExpenseType, LifePerson, LifePurchaseOptionRow, LifePurchaseRow, StartingCashMode } from "@/types/db";
+import type { ExpensePayer, ExpenseType, LifePerson, LifePurchaseOptionRow, LifePurchaseRow, StartingCashMode } from "@/types/db";
 
 const VALID_PERSONS: LifePerson[] = ["bride", "groom", "both"];
+// Expenses additionally allow "gift"/"free" (covered externally — no cost to the couple).
+const VALID_EXPENSE_PAYERS: ExpensePayer[] = ["bride", "groom", "both", "gift", "free"];
 
 function trimMonth(v: FormDataEntryValue | null): string | null {
   const s = String(v ?? "").trim();
@@ -90,7 +92,7 @@ function parseExpense(form: FormData) {
   const day_of_month = !isNaN(rawDay) && rawDay >= 1 && rawDay <= 31 ? rawDay : null;
 
   if (!name) return { error: "Please enter a name." };
-  if (!VALID_PERSONS.includes(payer)) return { error: "Invalid payer." };
+  if (!VALID_EXPENSE_PAYERS.includes(payer)) return { error: "Invalid payer." };
 
   if (expense_type === "credit") {
     const credit_total = parseFloat(String(form.get("credit_total") ?? ""));

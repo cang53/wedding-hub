@@ -8,6 +8,7 @@ import type {
   LifePurchaseOptionRow,
   LifeSettingsRow,
   LifePerson,
+  ExpensePayer,
   StartingCashMode,
   ExpenseType,
   WeddingSavingsRow,
@@ -64,6 +65,19 @@ const PERSON_OPTIONS: { value: LifePerson; label: string }[] = [
   { value: "bride", label: "Bride" },
 ];
 
+// Expense payer adds "Gift" and "Free" — covered externally, so €0 to the couple.
+const EXPENSE_PAYER_OPTIONS: { value: ExpensePayer; label: string }[] = [
+  ...PERSON_OPTIONS,
+  { value: "gift", label: "🎁 Gift" },
+  { value: "free", label: "Free" },
+];
+
+/** True when an expense is covered externally (gift / free) and therefore
+ *  doesn't cost the couple anything. */
+function isExternalPayer(payer: ExpensePayer): boolean {
+  return payer === "gift" || payer === "free";
+}
+
 // ============================================================================
 // Helpers — month math
 // ============================================================================
@@ -108,7 +122,7 @@ function isActiveInMonth(start: string | null, end: string | null, current: stri
   return true;
 }
 
-function personShare(payer: LifePerson, groomPct: number | null, side: "groom" | "bride"): number {
+function personShare(payer: ExpensePayer, groomPct: number | null, side: "groom" | "bride"): number {
   if (payer === side) return 1;
   if (payer === "both") {
     const g = (groomPct ?? 50) / 100;
@@ -257,7 +271,7 @@ export function LifeBudgetClient({
 
       const monthFixed = expenses
         .filter((e) => isActiveInMonth(e.start_month, e.end_month, month))
-        .reduce((a, e) => a + Number(e.amount), 0);
+        .reduce((a, e) => a + (isExternalPayer(e.payer) ? 0 : Number(e.amount)), 0);
 
       const monthPurchases = purchases
         .filter((p) => p.scheduled && p.target_month === month)
@@ -281,7 +295,7 @@ export function LifeBudgetClient({
       .reduce((a, i) => a + Number(i.amount), 0);
     const monthlyFixed = expenses
       .filter((e) => isActiveInMonth(e.start_month, e.end_month, firstMonth))
-      .reduce((a, e) => a + Number(e.amount), 0);
+      .reduce((a, e) => a + (isExternalPayer(e.payer) ? 0 : Number(e.amount)), 0);
     const monthlyNet = monthlyIncome - monthlyFixed;
 
     // Runway: starting cash divided by monthly burn (when income < expenses).
@@ -581,8 +595,8 @@ export function LifeBudgetClient({
             secondary: e.expense_type === "credit"
               ? `Credit · ${e.credit_months}mo${e.credit_interest_rate ? ` @ ${e.credit_interest_rate}%` : ""} · ${e.start_month ? monthLabel(e.start_month) : "?"} → ${e.end_month ? monthLabel(e.end_month) : "?"} · ${payerLabel(e.payer, e.payer_groom_pct)}`
               : `${e.category ?? "—"} · ${payerLabel(e.payer, e.payer_groom_pct)}`,
-            value: `−${formatMoney(e.amount)}/mo`,
-            valueClass: "text-burgundy",
+            value: isExternalPayer(e.payer) ? formatMoney(e.amount) : `−${formatMoney(e.amount)}/mo`,
+            valueClass: isExternalPayer(e.payer) ? "text-ink-soft" : "text-burgundy",
             onClick: () => setExpenseDialog({ open: true, editing: e }),
             onDelete: () => handleDeleteExpense(e),
           }))}
@@ -843,8 +857,10 @@ function personLabel(p: LifePerson): string {
   return p === "both" ? "Joint" : p === "groom" ? "Groom" : "Bride";
 }
 
-function payerLabel(payer: LifePerson, pct: number | null): string {
+function payerLabel(payer: ExpensePayer, pct: number | null): string {
   if (payer === "both") return `Both (${pct ?? 50}% groom)`;
+  if (payer === "gift") return "Gift";
+  if (payer === "free") return "Free";
   return payer === "groom" ? "Groom" : "Bride";
 }
 
@@ -2192,7 +2208,7 @@ function ExpenseDialog({
     FormData
   >(action, null);
 
-  const [payer, setPayer] = useState<LifePerson>(editing?.payer ?? "both");
+  const [payer, setPayer] = useState<ExpensePayer>(editing?.payer ?? "both");
   const [expenseType, setExpenseType] = useState<ExpenseType>(editing?.expense_type ?? "fixed");
   // Credit live-calculation state
   const [creditTotal, setCreditTotal] = useState(editing?.credit_total ?? 0);
@@ -2352,10 +2368,10 @@ function ExpenseDialog({
             <div className="flex flex-col gap-2">
               <Label>Who pays?</Label>
               <input type="hidden" name="payer" value={payer} />
-              <Select value={payer} onValueChange={(v) => setPayer(v as LifePerson)}>
+              <Select value={payer} onValueChange={(v) => setPayer(v as ExpensePayer)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {PERSON_OPTIONS.map((o) => (
+                  {EXPENSE_PAYER_OPTIONS.map((o) => (
                     <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                   ))}
                 </SelectContent>
@@ -2368,6 +2384,12 @@ function ExpenseDialog({
               </div>
             )}
           </div>
+
+          {isExternalPayer(payer) && (
+            <p className="text-[12px] text-ink-soft italic -mt-1">
+              {payer === "gift" ? "Covered as a gift" : "This one's free"} — tracked for reference, but it won&rsquo;t reduce your savings.
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
             <div className="flex flex-col gap-2">
@@ -2867,6 +2889,8 @@ function ExpandedExpensesDialog({ open, onOpenChange, expenses, onEdit, onDelete
             <option value="groom">Groom</option>
             <option value="bride">Bride</option>
             <option value="both">Both</option>
+            <option value="gift">Gift</option>
+            <option value="free">Free</option>
           </select>
           <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={filterSelect}>
             <option value="all">All types</option>
@@ -2896,7 +2920,9 @@ function ExpandedExpensesDialog({ open, onOpenChange, expenses, onEdit, onDelete
                   </td>
                   <td className="py-2.5 px-3 text-ink-soft">{e.category ?? "—"}</td>
                   <td className="py-2.5 px-3 text-ink-soft">{payerLabel(e.payer, e.payer_groom_pct)}</td>
-                  <td className="py-2.5 px-3 font-mono text-burgundy">−{formatMoney(e.amount)}</td>
+                  <td className={`py-2.5 px-3 font-mono ${isExternalPayer(e.payer) ? "text-ink-soft" : "text-burgundy"}`}>
+                    {isExternalPayer(e.payer) ? formatMoney(e.amount) : `−${formatMoney(e.amount)}`}
+                  </td>
                   <td className="py-2.5 px-3 text-ink-soft text-[11px]">
                     {e.start_month ? monthLabel(e.start_month) : <em>Always</em>}
                     {(e.start_month || e.end_month) && " → "}
@@ -3706,7 +3732,10 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
     });
     filteredExpenses.forEach((e) => {
       if (isActiveInMonth(e.start_month, e.end_month, currentMonth)) {
-        const share = personFilter !== "all" ? personShare(e.payer, e.payer_groom_pct, personFilter) : 1;
+        const share = personFilter !== "all"
+          ? personShare(e.payer, e.payer_groom_pct, personFilter)
+          : (isExternalPayer(e.payer) ? 0 : 1);
+        if (share === 0) return;
         out.push({ id: e.id, type: "expense", name: e.name, amount: Number(e.amount) * share, day: e.day_of_month ?? null });
       }
     });
@@ -3743,7 +3772,9 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
       });
       filteredExpenses.forEach((e) => {
         if (isActiveInMonth(e.start_month, e.end_month, month)) {
-          const share = personFilter !== "all" ? personShare(e.payer, e.payer_groom_pct, personFilter) : 1;
+          const share = personFilter !== "all"
+            ? personShare(e.payer, e.payer_groom_pct, personFilter)
+            : (isExternalPayer(e.payer) ? 0 : 1);
           cash -= Number(e.amount) * share;
         }
       });
