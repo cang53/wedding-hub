@@ -1,7 +1,7 @@
 "use server";
 
 import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
-import type { ExpenseType, LifePerson, StartingCashMode } from "@/types/db";
+import type { ExpenseType, LifePerson, LifePurchaseOptionRow, LifePurchaseRow, StartingCashMode } from "@/types/db";
 
 const VALID_PERSONS: LifePerson[] = ["bride", "groom", "both"];
 
@@ -162,9 +162,14 @@ export async function deleteExpense(id: string): Promise<{ error?: string }> {
 
 // ---- One-time purchases --------------------------------------------------
 
-function parsePurchase(form: FormData) {
+/**
+ * @param amountOverride when the purchase is driven by a chosen option, the
+ *   option's price is used as the amount and the form's `amount` field (which
+ *   the dialog leaves blank in options mode) is ignored.
+ */
+function parsePurchase(form: FormData, amountOverride?: number) {
   const name = String(form.get("name") ?? "").trim();
-  const amount = parseFloat(String(form.get("amount") ?? ""));
+  const amount = amountOverride !== undefined ? amountOverride : parseFloat(String(form.get("amount") ?? ""));
   const already_paid = Math.max(0, parseFloat(String(form.get("already_paid") ?? "0")) || 0);
   const category = String(form.get("category") ?? "").trim() || null;
   const target_month = trimMonth(form.get("target_month"));
@@ -183,22 +188,169 @@ function parsePurchase(form: FormData) {
   return { name, amount, already_paid, category, target_month, payer, payer_groom_pct, scheduled, day_of_month, notes };
 }
 
+// ---- Purchase options ----------------------------------------------------
+
+type ParsedOption = {
+  label: string;
+  amount: number;
+  link: string | null;
+  notes: string | null;
+  groom_like: boolean;
+  bride_like: boolean;
+};
+
+/** Parse the inline options editor payload. Returns the cleaned list and the
+ *  index of the chosen option (defaults to the first when unset). */
+function parseOptions(form: FormData): { options: ParsedOption[]; chosenIndex: number } {
+  const raw = String(form.get("options_json") ?? "").trim();
+  if (!raw) return { options: [], chosenIndex: -1 };
+  let arr: unknown;
+  try { arr = JSON.parse(raw); } catch { return { options: [], chosenIndex: -1 }; }
+  if (!Array.isArray(arr)) return { options: [], chosenIndex: -1 };
+
+  const options: ParsedOption[] = arr
+    .map((o) => {
+      const r = o as Record<string, unknown>;
+      return {
+        label: String(r.label ?? "").trim(),
+        amount: Number(r.amount) || 0,
+        link: String(r.link ?? "").trim() || null,
+        notes: String(r.notes ?? "").trim() || null,
+        groom_like: Boolean(r.groom_like),
+        bride_like: Boolean(r.bride_like),
+      };
+    })
+    .filter((o) => o.label.length > 0 && o.amount >= 0);
+
+  let chosenIndex = parseInt(String(form.get("chosen_index") ?? ""), 10);
+  if (isNaN(chosenIndex) || chosenIndex < 0 || chosenIndex >= options.length) {
+    chosenIndex = options.length > 0 ? 0 : -1;
+  }
+  return { options, chosenIndex };
+}
+
+type SupabaseClient = ReturnType<typeof createSupabaseServerClient>;
+
+/** Replace the option set for a purchase. Returns the inserted rows (in order),
+ *  the chosen option's id and its amount. Inserts sequentially so row order —
+ *  and therefore the chosen index — is reliable. */
+async function persistOptions(
+  supabase: SupabaseClient,
+  purchaseId: string,
+  options: ParsedOption[],
+  chosenIndex: number,
+): Promise<{ selectedId: string | null; amount: number | null; rows: LifePurchaseOptionRow[] }> {
+  // Clear the FK first, then wipe the old options so we start from a clean slate.
+  await supabase.from("life_purchases").update({ selected_option_id: null } as never).eq("id", purchaseId);
+  await supabase.from("life_purchase_options").delete().eq("purchase_id", purchaseId);
+
+  if (options.length === 0) return { selectedId: null, amount: null, rows: [] };
+
+  const rows: LifePurchaseOptionRow[] = [];
+  for (const o of options) {
+    const { data, error } = await supabase
+      .from("life_purchase_options")
+      .insert({ ...o, purchase_id: purchaseId } as never)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    rows.push(data as LifePurchaseOptionRow);
+  }
+  const chosen = rows[chosenIndex] ?? rows[0] ?? null;
+  return { selectedId: chosen?.id ?? null, amount: chosen ? Number(chosen.amount) : null, rows };
+}
+
 export async function createPurchase(_prev: unknown, form: FormData) {
-  const parsed = parsePurchase(form);
+  const { options, chosenIndex } = parseOptions(form);
+  const hasOptions = String(form.get("has_options") ?? "") === "true" && options.length > 0;
+  const amountOverride = hasOptions ? (options[chosenIndex >= 0 ? chosenIndex : 0]?.amount ?? 0) : undefined;
+
+  const parsed = parsePurchase(form, amountOverride);
   if ("error" in parsed) return { error: parsed.error };
+
   const supabase = createSupabaseServerClient();
   const { data, error } = await supabase.from("life_purchases").insert(parsed as never).select().single();
   if (error) return { error: error.message };
-  return { ok: true as const, data };
+
+  let purchase = data as LifePurchaseRow;
+  let optionRows: LifePurchaseOptionRow[] = [];
+  if (hasOptions) {
+    try {
+      const res = await persistOptions(supabase, purchase.id, options, chosenIndex);
+      optionRows = res.rows;
+      const { data: upd, error: e2 } = await supabase
+        .from("life_purchases")
+        .update({ selected_option_id: res.selectedId, amount: res.amount ?? purchase.amount } as never)
+        .eq("id", purchase.id)
+        .select()
+        .single();
+      if (e2) return { error: e2.message };
+      purchase = upd as LifePurchaseRow;
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  }
+  return { ok: true as const, data: purchase, options: optionRows };
 }
 
 export async function updatePurchase(id: string, _prev: unknown, form: FormData) {
-  const parsed = parsePurchase(form);
+  const { options, chosenIndex } = parseOptions(form);
+  const hasOptions = String(form.get("has_options") ?? "") === "true" && options.length > 0;
+  const amountOverride = hasOptions ? (options[chosenIndex >= 0 ? chosenIndex : 0]?.amount ?? 0) : undefined;
+
+  const parsed = parsePurchase(form, amountOverride);
   if ("error" in parsed) return { error: parsed.error };
+
   const supabase = createSupabaseServerClient();
-  const { data, error } = await supabase.from("life_purchases").update(parsed as never).eq("id", id).select().single();
+
+  // Reconcile options first (clearing them when options mode is off) so the
+  // selected_option_id can be written in the same purchase update.
+  let optionRows: LifePurchaseOptionRow[] = [];
+  let selectedId: string | null = null;
+  try {
+    const res = await persistOptions(supabase, id, hasOptions ? options : [], chosenIndex);
+    optionRows = res.rows;
+    selectedId = res.selectedId;
+  } catch (err) {
+    return { error: (err as Error).message };
+  }
+
+  const { data, error } = await supabase
+    .from("life_purchases")
+    .update({ ...parsed, selected_option_id: selectedId } as never)
+    .eq("id", id)
+    .select()
+    .single();
   if (error) return { error: error.message };
-  return { ok: true as const, data };
+  return { ok: true as const, data: data as LifePurchaseRow, options: optionRows };
+}
+
+/** Switch the chosen option for a purchase and mirror its price into the
+ *  purchase amount so the projection/calendar update everywhere. */
+export async function selectPurchaseOption(purchaseId: string, optionId: string) {
+  const supabase = createSupabaseServerClient();
+  const { data: opt, error: e1 } = await supabase
+    .from("life_purchase_options")
+    .select("amount")
+    .eq("id", optionId)
+    .single();
+  if (e1) return { error: e1.message };
+  const amount = Number((opt as { amount: number }).amount);
+  const { error } = await supabase
+    .from("life_purchases")
+    .update({ selected_option_id: optionId, amount } as never)
+    .eq("id", purchaseId);
+  if (error) return { error: error.message };
+  return { ok: true as const, amount };
+}
+
+/** Toggle a partner's "like" on a single option. */
+export async function setPurchaseOptionLike(optionId: string, who: "groom" | "bride", liked: boolean) {
+  const supabase = createSupabaseServerClient();
+  const patch = who === "groom" ? { groom_like: liked } : { bride_like: liked };
+  const { error } = await supabase.from("life_purchase_options").update(patch as never).eq("id", optionId);
+  if (error) return { error: error.message };
+  return {};
 }
 
 export async function togglePurchaseScheduled(id: string, scheduled: boolean) {

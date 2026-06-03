@@ -5,6 +5,7 @@ import type {
   LifeIncomeRow,
   LifeExpenseRow,
   LifePurchaseRow,
+  LifePurchaseOptionRow,
   LifeSettingsRow,
   LifePerson,
   StartingCashMode,
@@ -182,6 +183,7 @@ interface Props {
   initialIncome: LifeIncomeRow[];
   initialExpenses: LifeExpenseRow[];
   initialPurchases: LifePurchaseRow[];
+  initialPurchaseOptions: LifePurchaseOptionRow[];
   initialSettings: LifeSettingsRow;
   initialSavings: WeddingSavingsRow[];
 }
@@ -190,12 +192,14 @@ export function LifeBudgetClient({
   initialIncome,
   initialExpenses,
   initialPurchases,
+  initialPurchaseOptions,
   initialSettings,
   initialSavings,
 }: Props) {
   const [income, setIncome] = useState<LifeIncomeRow[]>(initialIncome);
   const [expenses, setExpenses] = useState<LifeExpenseRow[]>(initialExpenses);
   const [purchases, setPurchases] = useState<LifePurchaseRow[]>(initialPurchases);
+  const [purchaseOptions, setPurchaseOptions] = useState<LifePurchaseOptionRow[]>(initialPurchaseOptions);
   const [settings, setSettings] = useState<LifeSettingsRow>(initialSettings);
   const [savings, setSavings] = useState<WeddingSavingsRow[]>(initialSavings);
 
@@ -407,6 +411,25 @@ export function LifeBudgetClient({
     }).slice(0, 3);
   }, [purchases]);
 
+  // Group purchase options by purchase for compact list display.
+  const optionsByPurchase = useMemo(() => {
+    const m = new Map<string, LifePurchaseOptionRow[]>();
+    purchaseOptions.forEach((o) => {
+      const arr = m.get(o.purchase_id) ?? [];
+      arr.push(o);
+      m.set(o.purchase_id, arr);
+    });
+    return m;
+  }, [purchaseOptions]);
+
+  /** Short "· 3 options: Dyson V11" suffix for a purchase that has options. */
+  const optionsSuffix = (p: LifePurchaseRow): string => {
+    const opts = optionsByPurchase.get(p.id);
+    if (!opts || opts.length === 0) return "";
+    const chosen = opts.find((o) => o.id === p.selected_option_id);
+    return ` · ${opts.length} option${opts.length > 1 ? "s" : ""}${chosen ? `: ${chosen.label}` : ""}`;
+  };
+
   // ---- Render -------------------------------------------------------------
   return (
     <section className="animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -580,9 +603,9 @@ export function LifeBudgetClient({
             return {
               id: p.id,
               primary: p.name,
-              secondary: paid > 0
+              secondary: (paid > 0
                 ? `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${formatMoney(paid)} paid of ${formatMoney(p.amount)} · ${payerLabel(p.payer, p.payer_groom_pct)}`
-                : `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${payerLabel(p.payer, p.payer_groom_pct)}`,
+                : `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${payerLabel(p.payer, p.payer_groom_pct)}`) + optionsSuffix(p),
               value: paid > 0 ? `−${formatMoney(remaining)}` : `−${formatMoney(p.amount)}`,
               valueClass: p.scheduled ? (remaining === 0 ? "text-sage" : "text-burgundy") : "text-ink-soft line-through",
               onClick: () => setPurchaseDialog({ open: true, editing: p }),
@@ -734,13 +757,16 @@ export function LifeBudgetClient({
           open={purchaseDialog.open}
           onOpenChange={(o) => setPurchaseDialog({ open: o, editing: o ? purchaseDialog.editing : null })}
           editing={purchaseDialog.editing}
+          editingOptions={purchaseDialog.editing ? purchaseOptions.filter((o) => o.purchase_id === purchaseDialog.editing!.id) : []}
           defaultMonth={settings.start_month}
-          onSaved={(row) => {
+          onSaved={(row, options) => {
             setPurchases((prev) => {
               const exists = prev.some((i) => i.id === row.id);
               const next = exists ? prev.map((i) => (i.id === row.id ? row : i)) : [...prev, row];
               return next.sort((a, b) => a.target_month.localeCompare(b.target_month));
             });
+            // Replace this purchase's options with the freshly persisted set.
+            setPurchaseOptions((prev) => [...prev.filter((o) => o.purchase_id !== row.id), ...options]);
           }}
         />
       )}
@@ -2364,36 +2390,83 @@ function ExpenseDialog({
   );
 }
 
+type EditableOption = {
+  key: string;
+  label: string;
+  amount: number;
+  link: string;
+  notes: string;
+  groom_like: boolean;
+  bride_like: boolean;
+};
+
+function newOption(over: Partial<EditableOption> = {}): EditableOption {
+  return {
+    key: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Math.random()),
+    label: "", amount: 0, link: "", notes: "", groom_like: false, bride_like: false, ...over,
+  };
+}
+
 function PurchaseDialog({
-  open, onOpenChange, editing, defaultMonth, onSaved,
+  open, onOpenChange, editing, editingOptions, defaultMonth, onSaved,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   editing: LifePurchaseRow | null;
+  editingOptions: LifePurchaseOptionRow[];
   defaultMonth: string;
-  onSaved: (row: LifePurchaseRow) => void;
+  onSaved: (row: LifePurchaseRow, options: LifePurchaseOptionRow[]) => void;
 }) {
   const action = editing ? updatePurchase.bind(null, editing.id) : createPurchase;
   const [state, formAction, pending] = useActionState<
-    { error?: string; ok?: true; data?: LifePurchaseRow } | null,
+    { error?: string; ok?: true; data?: LifePurchaseRow; options?: LifePurchaseOptionRow[] } | null,
     FormData
   >(action, null);
 
   const [payer, setPayer] = useState<LifePerson>(editing?.payer ?? "both");
   const [totalCost, setTotalCost] = useState<number>(Number(editing?.amount ?? 0));
   const [alreadyPaid, setAlreadyPaid] = useState<number>(Number(editing?.already_paid ?? 0));
-  useEffect(() => {
-    setPayer(editing?.payer ?? "both");
-    setTotalCost(Number(editing?.amount ?? 0));
-    setAlreadyPaid(Number(editing?.already_paid ?? 0));
-  }, [editing]);
+
+  // Options ("compare several products & vote") — dialog is keyed by purchase
+  // id, so initial state derived here is correct for each open.
+  const [optionsMode, setOptionsMode] = useState(editingOptions.length > 0);
+  const [opts, setOpts] = useState<EditableOption[]>(
+    editingOptions.map((o) => ({
+      key: o.id, label: o.label, amount: Number(o.amount),
+      link: o.link ?? "", notes: o.notes ?? "", groom_like: o.groom_like, bride_like: o.bride_like,
+    })),
+  );
+  const [chosenIdx, setChosenIdx] = useState(() => {
+    const i = editingOptions.findIndex((o) => o.id === editing?.selected_option_id);
+    return i >= 0 ? i : 0;
+  });
 
   useEffect(() => {
-    if (state?.ok && state?.data) { onSaved(state.data); onOpenChange(false); }
+    if (state?.ok && state?.data) { onSaved(state.data, state.options ?? []); onOpenChange(false); }
   }, [state, onSaved, onOpenChange]);
 
-  const remaining = Math.max(0, totalCost - alreadyPaid);
-  const paidPct = totalCost > 0 ? Math.min(100, (alreadyPaid / totalCost) * 100) : 0;
+  const safeChosen = Math.min(chosenIdx, Math.max(0, opts.length - 1));
+  const validOpts = opts.filter((o) => o.label.trim() && o.amount > 0);
+  const effectiveCost = optionsMode && opts.length > 0 ? (opts[safeChosen]?.amount ?? 0) : totalCost;
+  const remaining = Math.max(0, effectiveCost - alreadyPaid);
+  const paidPct = effectiveCost > 0 ? Math.min(100, (alreadyPaid / effectiveCost) * 100) : 0;
+  const canSave = !optionsMode || validOpts.length > 0;
+
+  const enableOptions = () => {
+    setOptionsMode(true);
+    if (opts.length === 0) {
+      setOpts([newOption({ amount: totalCost || 0 })]);
+      setChosenIdx(0);
+    }
+  };
+  const updateOpt = (i: number, patch: Partial<EditableOption>) =>
+    setOpts((prev) => prev.map((o, idx) => (idx === i ? { ...o, ...patch } : o)));
+  const removeOpt = (i: number) =>
+    setOpts((prev) => {
+      const next = prev.filter((_, idx) => idx !== i);
+      setChosenIdx((c) => (i < c ? c - 1 : Math.min(c, Math.max(0, next.length - 1))));
+      return next;
+    });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2403,40 +2476,69 @@ function PurchaseDialog({
           <DialogDescription>A one-time future purchase (furniture, appliance, etc.).</DialogDescription>
         </DialogHeader>
         <form action={formAction} className="flex flex-col gap-4 mt-2">
+          {/* Hidden payload for the options editor */}
+          <input type="hidden" name="has_options" value={optionsMode ? "true" : "false"} />
+          <input type="hidden" name="options_json" value={JSON.stringify(opts.map(({ key, ...rest }) => { void key; return rest; }))} />
+          <input type="hidden" name="chosen_index" value={String(safeChosen)} />
+
           <div className="flex flex-col gap-2">
             <Label htmlFor="name">Name</Label>
-            <Input id="name" name="name" defaultValue={editing?.name ?? ""} placeholder="e.g. Sofa" required autoFocus />
+            <Input id="name" name="name" defaultValue={editing?.name ?? ""} placeholder="e.g. Vacuum cleaner" required autoFocus />
           </div>
-          <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="amount">Total cost (€)</Label>
-              <Input id="amount" name="amount" type="number" min="0" step="any"
-                value={totalCost || ""}
-                onChange={(e) => setTotalCost(parseFloat(e.target.value) || 0)}
-                required />
+
+          {!optionsMode ? (
+            <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="amount">Total cost (€)</Label>
+                <Input id="amount" name="amount" type="number" min="0" step="any"
+                  value={totalCost || ""}
+                  onChange={(e) => setTotalCost(parseFloat(e.target.value) || 0)}
+                  required />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="already_paid">Already paid (€)</Label>
+                <Input id="already_paid" name="already_paid" type="number" min="0" step="any"
+                  value={alreadyPaid || ""}
+                  onChange={(e) => setAlreadyPaid(parseFloat(e.target.value) || 0)}
+                  placeholder="0" />
+              </div>
             </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="already_paid">Already paid (€)</Label>
-              <Input id="already_paid" name="already_paid" type="number" min="0" step="any"
-                value={alreadyPaid || ""}
-                onChange={(e) => setAlreadyPaid(parseFloat(e.target.value) || 0)}
-                placeholder="0" />
-            </div>
-          </div>
+          ) : (
+            <input type="hidden" name="already_paid" value={alreadyPaid || 0} />
+          )}
+
+          {/* Options toggle */}
+          {!optionsMode ? (
+            <button type="button" onClick={enableOptions}
+              className="self-start text-[12px] text-gold hover:text-gold/80 font-medium transition-colors">
+              + Compare options (different products / prices)
+            </button>
+          ) : (
+            <OptionsEditor
+              opts={opts}
+              chosenIdx={safeChosen}
+              onChoose={setChosenIdx}
+              onUpdate={updateOpt}
+              onRemove={removeOpt}
+              onAdd={() => setOpts((prev) => [...prev, newOption()])}
+              onDisable={() => setOptionsMode(false)}
+              alreadyPaid={alreadyPaid}
+              onAlreadyPaid={setAlreadyPaid}
+            />
+          )}
+
           {/* Live remaining preview */}
-          {totalCost > 0 && (
+          {effectiveCost > 0 && (
             <div className="bg-cream-deep/60 border border-line rounded-[4px] px-4 py-3 text-[12px] space-y-2">
               <div className="flex justify-between">
-                <span className="text-ink-soft">Still to pay</span>
+                <span className="text-ink-soft">{optionsMode ? "Chosen option · still to pay" : "Still to pay"}</span>
                 <span className={`font-mono font-medium ${remaining > 0 ? "text-ink" : "text-sage"}`}>
                   {remaining > 0 ? formatMoney(remaining) : "Fully paid ✓"}
                 </span>
               </div>
-              {totalCost > 0 && (
-                <div className="h-1.5 bg-line rounded-full overflow-hidden">
-                  <div className="h-full bg-sage rounded-full transition-all" style={{ width: `${paidPct}%` }} />
-                </div>
-              )}
+              <div className="h-1.5 bg-line rounded-full overflow-hidden">
+                <div className="h-full bg-sage rounded-full transition-all" style={{ width: `${paidPct}%` }} />
+              </div>
             </div>
           )}
           <div className="flex flex-col gap-2">
@@ -2488,13 +2590,125 @@ function PurchaseDialog({
             <Textarea id="notes" name="notes" defaultValue={editing?.notes ?? ""} rows={2} />
           </div>
           {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
+          {optionsMode && !canSave && (
+            <p className="text-sm text-burgundy">Give at least one option a name and a price above €0.</p>
+          )}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
+            <Button type="submit" disabled={pending || !canSave}>{pending ? "Saving…" : "Save"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Options editor — compare alternatives, vote, and pick the one that drives
+// the purchase price everywhere in the Life After tab.
+// ----------------------------------------------------------------------------
+
+function OptionsEditor({
+  opts, chosenIdx, onChoose, onUpdate, onRemove, onAdd, onDisable, alreadyPaid, onAlreadyPaid,
+}: {
+  opts: EditableOption[];
+  chosenIdx: number;
+  onChoose: (i: number) => void;
+  onUpdate: (i: number, patch: Partial<EditableOption>) => void;
+  onRemove: (i: number) => void;
+  onAdd: () => void;
+  onDisable: () => void;
+  alreadyPaid: number;
+  onAlreadyPaid: (v: number) => void;
+}) {
+  return (
+    <div className="border border-gold/40 bg-gold/[0.04] rounded-[6px] p-3.5 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-[0.2em] text-gold font-medium">Options to compare</span>
+          <span className="text-[10px] bg-cream-deep text-ink-soft rounded-full px-1.5 py-0.5 font-mono">{opts.length}</span>
+        </div>
+        <button type="button" onClick={onDisable} className="text-[11px] text-ink-soft hover:text-burgundy transition-colors">
+          Remove options
+        </button>
+      </div>
+      <p className="text-[11px] text-ink-soft -mt-1">
+        Add the alternatives you&rsquo;re weighing, tap a heart to vote, then choose one — its price flows through your whole plan.
+      </p>
+
+      <div className="flex flex-col gap-2">
+        {opts.map((o, i) => {
+          const chosen = i === chosenIdx;
+          return (
+            <div key={o.key}
+              className={`rounded-[5px] border p-2.5 transition-all ${chosen ? "border-gold bg-paper ring-1 ring-gold/30" : "border-line bg-paper/60"}`}>
+              <div className="flex items-center gap-2">
+                {/* Choose radio */}
+                <button type="button" onClick={() => onChoose(i)} title={chosen ? "Chosen" : "Choose this one"}
+                  className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors ${chosen ? "border-gold" : "border-line hover:border-gold/60"}`}>
+                  {chosen && <span className="w-2 h-2 rounded-full bg-gold" />}
+                </button>
+                <Input
+                  value={o.label}
+                  onChange={(e) => onUpdate(i, { label: e.target.value })}
+                  placeholder={`Option ${i + 1} — e.g. Dyson V11`}
+                  className="flex-1 h-8 text-[13px]"
+                />
+                <div className="relative shrink-0 w-[104px]">
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[12px] text-ink-soft">€</span>
+                  <Input
+                    type="number" min="0" step="any"
+                    value={o.amount || ""}
+                    onChange={(e) => onUpdate(i, { amount: parseFloat(e.target.value) || 0 })}
+                    placeholder="0"
+                    className="h-8 text-[13px] pl-5 font-mono"
+                  />
+                </div>
+                <button type="button" onClick={() => onRemove(i)} disabled={opts.length <= 1}
+                  className="text-ink-soft hover:text-burgundy text-[18px] leading-none shrink-0 disabled:opacity-25 disabled:cursor-not-allowed"
+                  aria-label="Remove option">×</button>
+              </div>
+              <div className="flex items-center gap-2 mt-2 pl-6">
+                <Input
+                  value={o.link}
+                  onChange={(e) => onUpdate(i, { link: e.target.value })}
+                  placeholder="Link (optional)"
+                  className="flex-1 h-7 text-[11px]"
+                />
+                <VoteHeart who="Groom" active={o.groom_like} accent="sage" onClick={() => onUpdate(i, { groom_like: !o.groom_like })} />
+                <VoteHeart who="Bride" active={o.bride_like} accent="rose" onClick={() => onUpdate(i, { bride_like: !o.bride_like })} />
+                {chosen && <span className="text-[10px] uppercase tracking-[0.15em] text-gold font-medium">Chosen</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <button type="button" onClick={onAdd}
+          className="text-[12px] text-gold hover:text-gold/80 font-medium transition-colors">+ Add option</button>
+        <label className="flex items-center gap-2 text-[11px] text-ink-soft">
+          Already paid (€)
+          <Input type="number" min="0" step="any" value={alreadyPaid || ""}
+            onChange={(e) => onAlreadyPaid(parseFloat(e.target.value) || 0)}
+            placeholder="0" className="h-7 w-[90px] text-[12px] font-mono" />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function VoteHeart({ who, active, accent, onClick }: {
+  who: string; active: boolean; accent: "sage" | "rose"; onClick: () => void;
+}) {
+  const activeCls = accent === "sage" ? "text-sage border-sage bg-sage/10" : "text-rose border-rose bg-rose/10";
+  return (
+    <button type="button" onClick={onClick} title={`${who} likes this`}
+      className={`flex items-center gap-1 px-2 h-7 rounded-full border text-[10px] font-medium transition-colors shrink-0 ${
+        active ? activeCls : "text-ink-soft/60 border-line hover:border-ink-soft/40"
+      }`}>
+      <span>{active ? "♥" : "♡"}</span>{who}
+    </button>
   );
 }
 

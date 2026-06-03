@@ -181,7 +181,21 @@ export interface LifePurchaseRow {
   payer_groom_pct: number | null;
   scheduled: boolean;
   day_of_month: number | null;
+  selected_option_id: string | null;
   notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LifePurchaseOptionRow {
+  id: string;
+  purchase_id: string;
+  label: string;
+  amount: number;
+  link: string | null;
+  notes: string | null;
+  groom_like: boolean;
+  bride_like: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -524,6 +538,7 @@ export type Database = {
           payer_groom_pct?: number | null;
           scheduled?: boolean;
           day_of_month?: number | null;
+          selected_option_id?: string | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -539,7 +554,36 @@ export type Database = {
           payer_groom_pct?: number | null;
           scheduled?: boolean;
           day_of_month?: number | null;
+          selected_option_id?: string | null;
           notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      life_purchase_options: {
+        Row: LifePurchaseOptionRow;
+        Insert: {
+          id?: string;
+          purchase_id: string;
+          label: string;
+          amount: number;
+          link?: string | null;
+          notes?: string | null;
+          groom_like?: boolean;
+          bride_like?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          purchase_id?: string;
+          label?: string;
+          amount?: number;
+          link?: string | null;
+          notes?: string | null;
+          groom_like?: boolean;
+          bride_like?: boolean;
           created_at?: string;
           updated_at?: string;
         };
