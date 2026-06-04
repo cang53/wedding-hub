@@ -197,6 +197,7 @@ function parsePurchase(form: FormData, amountOverride?: number) {
   const { payer, payer_groom_pct } = parsePayerSplit(form);
   const rawDay = parseInt(String(form.get("day_of_month") ?? ""), 10);
   const day_of_month = !isNaN(rawDay) && rawDay >= 1 && rawDay <= 31 ? rawDay : null;
+  const breakdown_items = parseBreakdownItems(form);
 
   if (!name) return { error: "Please enter a name." };
   if (isNaN(amount) || amount < 0) return { error: "Please enter a valid amount." };
@@ -204,7 +205,7 @@ function parsePurchase(form: FormData, amountOverride?: number) {
   if (!target_month) return { error: "Please select a target month." };
   if (!VALID_EXPENSE_PAYERS.includes(payer)) return { error: "Invalid payer." };
 
-  return { name, amount, already_paid, category, target_month, payer, payer_groom_pct, scheduled, day_of_month, notes };
+  return { name, amount, already_paid, category, target_month, payer, payer_groom_pct, scheduled, day_of_month, notes, breakdown_items };
 }
 
 // ---- Purchase options ----------------------------------------------------

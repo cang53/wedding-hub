@@ -192,6 +192,7 @@ export interface LifePurchaseRow {
   day_of_month: number | null;
   selected_option_id: string | null;
   notes: string | null;
+  breakdown_items: ExpenseBreakdownItem[];
   created_at: string;
   updated_at: string;
 }
@@ -551,6 +552,7 @@ export type Database = {
           day_of_month?: number | null;
           selected_option_id?: string | null;
           notes?: string | null;
+          breakdown_items?: ExpenseBreakdownItem[];
           created_at?: string;
           updated_at?: string;
         };
@@ -567,6 +569,7 @@ export type Database = {
           day_of_month?: number | null;
           selected_option_id?: string | null;
           notes?: string | null;
+          breakdown_items?: ExpenseBreakdownItem[];
           created_at?: string;
           updated_at?: string;
         };

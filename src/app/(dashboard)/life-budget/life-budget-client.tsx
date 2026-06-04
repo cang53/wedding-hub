@@ -620,7 +620,7 @@ export function LifeBudgetClient({
               primary: p.name,
               secondary: (paid > 0
                 ? `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${formatMoney(paid)} paid of ${formatMoney(p.amount)} · ${payerLabel(p.payer, p.payer_groom_pct)}`
-                : `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${payerLabel(p.payer, p.payer_groom_pct)}`) + optionsSuffix(p),
+                : `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${payerLabel(p.payer, p.payer_groom_pct)}`) + optionsSuffix(p) + (p.breakdown_items?.length ? ` · ${p.breakdown_items.length} items` : ""),
               value: isExternalPayer(p.payer)
                 ? formatMoney(p.amount)
                 : (paid > 0 ? `−${formatMoney(remaining)}` : `−${formatMoney(p.amount)}`),
@@ -2587,6 +2587,9 @@ function PurchaseDialog({
   const [payer, setPayer] = useState<ExpensePayer>(editing?.payer ?? "both");
   const [totalCost, setTotalCost] = useState<number>(Number(editing?.amount ?? 0));
   const [alreadyPaid, setAlreadyPaid] = useState<number>(Number(editing?.already_paid ?? 0));
+  const [breakdownItems, setBreakdownItems] = useState<BreakdownItem[]>(() =>
+    toBreakdownItems(editing?.breakdown_items ?? [])
+  );
 
   // Options ("compare several products & vote") — dialog is keyed by purchase
   // id, so initial state derived here is correct for each open.
@@ -2702,6 +2705,16 @@ function PurchaseDialog({
               </div>
             </div>
           )}
+
+          {breakdownItems.length === 0 ? (
+            <button type="button" onClick={() => setBreakdownItems([newBreakdownItem()])}
+              className="self-start text-[12px] text-gold hover:text-gold/80 font-medium transition-colors">
+              + Break down into items
+            </button>
+          ) : (
+            <BreakdownEditor total={effectiveCost} items={breakdownItems} onChange={setBreakdownItems} />
+          )}
+
           <div className="flex flex-col gap-2">
             <Label>Category</Label>
             <SelectField
@@ -2755,6 +2768,11 @@ function PurchaseDialog({
             <Label htmlFor="notes">Notes (optional)</Label>
             <Textarea id="notes" name="notes" defaultValue={editing?.notes ?? ""} rows={2} />
           </div>
+          <input
+            type="hidden"
+            name="breakdown_items_json"
+            value={JSON.stringify(breakdownItems.map(({ label, amount }) => ({ label, amount })))}
+          />
           {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
           {optionsMode && !canSave && (
             <p className="text-sm text-burgundy">Give at least one option a name and a price above €0.</p>
@@ -3151,6 +3169,7 @@ function ExpandedPurchasesDialog({ open, onOpenChange, purchases, onEdit, onDele
   const [scheduledFilter, setScheduledFilter] = useState("all");
   const [sortCol, setSortCol] = useState("target_month");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const categories = useMemo(() => [...new Set(purchases.map((p) => p.category).filter(Boolean))].sort(), [purchases]);
 
@@ -3220,28 +3239,78 @@ function ExpandedPurchasesDialog({ open, onOpenChange, purchases, onEdit, onDele
             <tbody>
               {rows.map((p) => {
                 const remaining = Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0));
+                const hasBreakdown = (p.breakdown_items?.length ?? 0) > 0;
+                const isExpanded = expandedId === p.id;
                 return (
-                  <tr key={p.id} className={`border-t border-line/50 hover:bg-cream/40 cursor-pointer group ${!p.scheduled ? "opacity-50" : ""}`} onClick={() => onEdit(p)}>
-                    <td className="py-2.5 px-3">
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); onToggleScheduled(p); }}
-                        className={`w-3.5 h-3.5 rounded-sm border transition-colors ${p.scheduled ? "bg-gold border-gold" : "bg-transparent border-line"}`}
-                        title={p.scheduled ? "Exclude from projection" : "Include in projection"}
-                      />
-                    </td>
-                    <td className="py-2.5 px-3 font-medium text-ink">{p.name}</td>
-                    <td className="py-2.5 px-3 text-ink-soft">{p.category ?? "—"}</td>
-                    <td className="py-2.5 px-3 font-mono text-ink-soft">{monthLabel(p.target_month)}</td>
-                    <td className="py-2.5 px-3 font-mono text-ink">{formatMoney(p.amount)}</td>
-                    <td className={`py-2.5 px-3 font-mono ${remaining === 0 ? "text-sage" : "text-burgundy"}`}>
-                      {remaining === 0 ? "Paid ✓" : `−${formatMoney(remaining)}`}
-                    </td>
-                    <td className="py-2.5 px-3 text-ink-soft">{payerLabel(p.payer, p.payer_groom_pct)}</td>
-                    <td className="py-2.5 px-3">
-                      <button onClick={(e) => { e.stopPropagation(); onDelete(p); }} className="opacity-0 group-hover:opacity-100 text-ink-soft hover:text-burgundy text-[16px] transition-opacity">×</button>
-                    </td>
-                  </tr>
+                  <Fragment key={p.id}>
+                    <tr className={`border-t border-line/50 hover:bg-cream/40 cursor-pointer group ${!p.scheduled ? "opacity-50" : ""}`} onClick={() => onEdit(p)}>
+                      <td className="py-2.5 px-3">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); onToggleScheduled(p); }}
+                          className={`w-3.5 h-3.5 rounded-sm border transition-colors ${p.scheduled ? "bg-gold border-gold" : "bg-transparent border-line"}`}
+                          title={p.scheduled ? "Exclude from projection" : "Include in projection"}
+                        />
+                      </td>
+                      <td className="py-2.5 px-3 font-medium text-ink">
+                        <div className="flex items-center gap-1.5">
+                          {hasBreakdown && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setExpandedId(isExpanded ? null : p.id); }}
+                              className={`text-[10px] w-4 h-4 flex items-center justify-center rounded transition-transform shrink-0 text-ink-soft hover:text-ink ${isExpanded ? "rotate-90" : ""}`}
+                              title="Show breakdown"
+                            >
+                              ▶
+                            </button>
+                          )}
+                          {p.name}
+                          {hasBreakdown && <span className="text-[9px] bg-line text-ink-soft rounded px-1.5 py-0.5 font-medium">{p.breakdown_items.length} items</span>}
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-ink-soft">{p.category ?? "—"}</td>
+                      <td className="py-2.5 px-3 font-mono text-ink-soft">{monthLabel(p.target_month)}</td>
+                      <td className="py-2.5 px-3 font-mono text-ink">{formatMoney(p.amount)}</td>
+                      <td className={`py-2.5 px-3 font-mono ${remaining === 0 ? "text-sage" : "text-burgundy"}`}>
+                        {remaining === 0 ? "Paid ✓" : `−${formatMoney(remaining)}`}
+                      </td>
+                      <td className="py-2.5 px-3 text-ink-soft">{payerLabel(p.payer, p.payer_groom_pct)}</td>
+                      <td className="py-2.5 px-3">
+                        <button onClick={(e) => { e.stopPropagation(); onDelete(p); }} className="opacity-0 group-hover:opacity-100 text-ink-soft hover:text-burgundy text-[16px] transition-opacity">×</button>
+                      </td>
+                    </tr>
+                    {isExpanded && hasBreakdown && (
+                      <tr className="bg-cream/50">
+                        <td colSpan={8} className="px-8 pb-3 pt-1">
+                          <div className="border-l-2 border-gold/40 pl-3 flex flex-col gap-1">
+                            {p.breakdown_items.map((item, idx) => {
+                              const pct = p.amount > 0 ? (item.amount / p.amount) * 100 : 0;
+                              return (
+                                <div key={idx} className="flex items-center gap-3 text-[12px]">
+                                  <span className="text-ink-soft w-3.5 shrink-0">·</span>
+                                  <span className="flex-1 text-ink">{item.label}</span>
+                                  <span className="font-mono text-ink-soft text-[11px]">{pct.toFixed(0)}%</span>
+                                  <span className={`font-mono font-medium w-20 text-right ${isExternalPayer(p.payer) ? "text-ink-soft" : "text-burgundy"}`}>
+                                    {isExternalPayer(p.payer) ? formatMoney(item.amount) : `−${formatMoney(item.amount)}`}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                            {(() => {
+                              const assigned = p.breakdown_items.reduce((s, i) => s + i.amount, 0);
+                              const diff = p.amount - assigned;
+                              if (Math.abs(diff) < 0.01) return null;
+                              return (
+                                <div className="text-[11px] text-ink-soft italic mt-0.5">
+                                  {diff > 0 ? `${formatMoney(diff)} unassigned` : `${formatMoney(-diff)} over total`}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
               {rows.length === 0 && <tr><td colSpan={8} className="py-8 text-center text-ink-soft italic text-[13px]">No results.</td></tr>}
