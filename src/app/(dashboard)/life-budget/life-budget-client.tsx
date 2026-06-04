@@ -3955,7 +3955,10 @@ interface CalendarViewProps {
 }
 
 function CalendarView({ income, expenses, purchases, settings, startingCash, groomStartingCash, brideStartingCash, projection, onAssignDay }: CalendarViewProps) {
-  const [currentMonth, setCurrentMonth] = useState(settings.start_month);
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    const today = dateToMonth(new Date());
+    return today >= settings.start_month ? today : settings.start_month;
+  });
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [personFilter, setPersonFilter] = useState<CalendarPersonFilter>("all");
   const [dragOverDay, setDragOverDay] = useState<number | null>(null);
