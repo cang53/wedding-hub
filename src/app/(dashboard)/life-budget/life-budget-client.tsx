@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
+import { Fragment, useActionState, useEffect, useMemo, useState, useTransition } from "react";
 import type {
   LifeIncomeRow,
   LifeExpenseRow,
@@ -12,6 +12,7 @@ import type {
   StartingCashMode,
   ExpenseType,
   WeddingSavingsRow,
+  ExpenseBreakdownItem,
 } from "@/types/db";
 import { formatMoney, formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -593,8 +594,8 @@ export function LifeBudgetClient({
             id: e.id,
             primary: e.name,
             secondary: e.expense_type === "credit"
-              ? `Credit · ${e.credit_months}mo${e.credit_interest_rate ? ` @ ${e.credit_interest_rate}%` : ""} · ${e.start_month ? monthLabel(e.start_month) : "?"} → ${e.end_month ? monthLabel(e.end_month) : "?"} · ${payerLabel(e.payer, e.payer_groom_pct)}`
-              : `${e.category ?? "—"} · ${payerLabel(e.payer, e.payer_groom_pct)}`,
+              ? `Credit · ${e.credit_months}mo${e.credit_interest_rate ? ` @ ${e.credit_interest_rate}%` : ""} · ${e.start_month ? monthLabel(e.start_month) : "?"} → ${e.end_month ? monthLabel(e.end_month) : "?"} · ${payerLabel(e.payer, e.payer_groom_pct)}${e.breakdown_items?.length ? ` · ${e.breakdown_items.length} items` : ""}`
+              : `${e.category ?? "—"} · ${payerLabel(e.payer, e.payer_groom_pct)}${e.breakdown_items?.length ? ` · ${e.breakdown_items.length} items` : ""}`,
             value: isExternalPayer(e.payer) ? formatMoney(e.amount) : `−${formatMoney(e.amount)}/mo`,
             valueClass: isExternalPayer(e.payer) ? "text-ink-soft" : "text-burgundy",
             onClick: () => setExpenseDialog({ open: true, editing: e }),
@@ -2198,6 +2199,107 @@ function IncomeDialog({
   );
 }
 
+// ---- Breakdown editor ------------------------------------------------------
+
+type BreakdownItem = { key: string; label: string; amount: number };
+
+function newBreakdownItem(): BreakdownItem {
+  return {
+    key: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Math.random()),
+    label: "",
+    amount: 0,
+  };
+}
+
+function toBreakdownItems(stored: ExpenseBreakdownItem[]): BreakdownItem[] {
+  return stored.map((item) => ({
+    key: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Math.random()),
+    label: item.label,
+    amount: item.amount,
+  }));
+}
+
+function BreakdownEditor({
+  total,
+  items,
+  onChange,
+}: {
+  total: number;
+  items: BreakdownItem[];
+  onChange: (items: BreakdownItem[]) => void;
+}) {
+  const assigned = items.reduce((s, i) => s + (i.amount || 0), 0);
+  const remaining = total - assigned;
+  const isOver = assigned > total + 0.01;
+  const isDone = total > 0 && Math.abs(remaining) < 0.01;
+  const pct = total > 0 ? Math.min(100, (assigned / total) * 100) : 0;
+
+  return (
+    <div className="flex flex-col gap-2 border border-line rounded-[4px] p-3 bg-cream/30">
+      <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft font-medium mb-0.5">Breakdown</div>
+      {items.map((item, idx) => (
+        <div key={item.key} className="flex gap-2 items-center">
+          <Input
+            placeholder="Label (e.g. Flights)"
+            value={item.label}
+            onChange={(e) =>
+              onChange(items.map((it, i) => (i === idx ? { ...it, label: e.target.value } : it)))
+            }
+            className="flex-1 h-8 text-[12px]"
+          />
+          <Input
+            type="number"
+            min="0"
+            step="any"
+            value={item.amount || ""}
+            onChange={(e) =>
+              onChange(items.map((it, i) => (i === idx ? { ...it, amount: parseFloat(e.target.value) || 0 } : it)))
+            }
+            className="w-24 h-8 text-[12px] font-mono"
+            placeholder="0"
+          />
+          <button
+            type="button"
+            onClick={() => onChange(items.filter((_, i) => i !== idx))}
+            className="text-ink-soft hover:text-burgundy text-[18px] leading-none shrink-0"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <div className="flex items-center justify-between gap-3 mt-0.5">
+        <button
+          type="button"
+          onClick={() => onChange([...items, newBreakdownItem()])}
+          className="text-[12px] text-gold hover:text-gold/80 font-medium transition-colors"
+        >
+          + Add item
+        </button>
+        {items.length > 0 && total > 0 && (
+          <span
+            className={`text-[11px] font-mono tabular-nums ${
+              isOver ? "text-burgundy" : isDone ? "text-sage" : "text-ink-soft"
+            }`}
+          >
+            {formatMoney(assigned)} / {formatMoney(total)}
+            {isDone ? " ✓" : isOver ? ` (+${formatMoney(assigned - total)})` : ` (${formatMoney(remaining)} left)`}
+          </span>
+        )}
+      </div>
+      {items.length > 0 && total > 0 && (
+        <div className="w-full h-1 bg-line rounded-full overflow-hidden mt-0.5">
+          <div
+            className={`h-full rounded-full transition-all ${isOver ? "bg-burgundy" : isDone ? "bg-sage" : "bg-gold"}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- ExpenseDialog ----------------------------------------------------------
+
 function ExpenseDialog({
   open, onOpenChange, editing, onSaved,
 }: {
@@ -2214,17 +2316,24 @@ function ExpenseDialog({
 
   const [payer, setPayer] = useState<ExpensePayer>(editing?.payer ?? "both");
   const [expenseType, setExpenseType] = useState<ExpenseType>(editing?.expense_type ?? "fixed");
+  const [fixedAmount, setFixedAmount] = useState(Number(editing?.amount ?? 0));
   // Credit live-calculation state
   const [creditTotal, setCreditTotal] = useState(editing?.credit_total ?? 0);
   const [creditMonths, setCreditMonths] = useState(editing?.credit_months ?? 12);
   const [creditRate, setCreditRate] = useState(editing?.credit_interest_rate ?? 0);
+  // Breakdown items
+  const [breakdownItems, setBreakdownItems] = useState<BreakdownItem[]>(() =>
+    toBreakdownItems(editing?.breakdown_items ?? [])
+  );
 
   useEffect(() => {
     setPayer(editing?.payer ?? "both");
     setExpenseType(editing?.expense_type ?? "fixed");
+    setFixedAmount(Number(editing?.amount ?? 0));
     setCreditTotal(editing?.credit_total ?? 0);
     setCreditMonths(editing?.credit_months ?? 12);
     setCreditRate(editing?.credit_interest_rate ?? 0);
+    setBreakdownItems(toBreakdownItems(editing?.breakdown_items ?? []));
   }, [editing]);
 
   useEffect(() => {
@@ -2279,7 +2388,12 @@ function ExpenseDialog({
               <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="amount">Monthly amount (€)</Label>
-                  <Input id="amount" name="amount" type="number" min="0" step="any" defaultValue={editing?.amount ?? ""} required />
+                  <Input
+                    id="amount" name="amount" type="number" min="0" step="any"
+                    value={fixedAmount || ""}
+                    onChange={(e) => setFixedAmount(parseFloat(e.target.value) || 0)}
+                    required
+                  />
                 </div>
                 <div className="flex flex-col gap-2">
                   <Label>Category</Label>
@@ -2300,6 +2414,14 @@ function ExpenseDialog({
                   <MonthSelect name="end_month" defaultValue={editing?.end_month ?? ""} />
                 </div>
               </div>
+              {breakdownItems.length === 0 ? (
+                <button type="button" onClick={() => setBreakdownItems([newBreakdownItem()])}
+                  className="self-start text-[12px] text-gold hover:text-gold/80 font-medium transition-colors">
+                  + Break down into items
+                </button>
+              ) : (
+                <BreakdownEditor total={fixedAmount} items={breakdownItems} onChange={setBreakdownItems} />
+              )}
             </>
           ) : (
             <>
@@ -2365,6 +2487,14 @@ function ExpenseDialog({
                   )}
                 </div>
               )}
+              {breakdownItems.length === 0 ? (
+                <button type="button" onClick={() => setBreakdownItems([newBreakdownItem()])}
+                  className="self-start text-[12px] text-gold hover:text-gold/80 font-medium transition-colors">
+                  + Break down into items
+                </button>
+              ) : (
+                <BreakdownEditor total={creditTotal} items={breakdownItems} onChange={setBreakdownItems} />
+              )}
             </>
           )}
 
@@ -2405,6 +2535,11 @@ function ExpenseDialog({
             <Label htmlFor="notes">Notes (optional)</Label>
             <Textarea id="notes" name="notes" defaultValue={editing?.notes ?? ""} rows={2} />
           </div>
+          <input
+            type="hidden"
+            name="breakdown_items_json"
+            value={JSON.stringify(breakdownItems.map(({ label, amount }) => ({ label, amount })))}
+          />
           {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
@@ -2857,6 +2992,7 @@ function ExpandedExpensesDialog({ open, onOpenChange, expenses, onEdit, onDelete
   const [typeFilter, setTypeFilter] = useState("all");
   const [sortCol, setSortCol] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const categories = useMemo(() => [...new Set(expenses.map((e) => e.category).filter(Boolean))].sort(), [expenses]);
 
@@ -2921,27 +3057,77 @@ function ExpandedExpensesDialog({ open, onOpenChange, expenses, onEdit, onDelete
               </tr>
             </thead>
             <tbody>
-              {rows.map((e) => (
-                <tr key={e.id} className="border-t border-line/50 hover:bg-cream/40 cursor-pointer group" onClick={() => onEdit(e)}>
-                  <td className="py-2.5 px-3 font-medium text-ink">
-                    {e.name}
-                    {e.expense_type === "credit" && <span className="ml-1.5 text-[9px] bg-gold/15 text-gold rounded px-1.5 py-0.5 font-medium">Credit</span>}
-                  </td>
-                  <td className="py-2.5 px-3 text-ink-soft">{e.category ?? "—"}</td>
-                  <td className="py-2.5 px-3 text-ink-soft">{payerLabel(e.payer, e.payer_groom_pct)}</td>
-                  <td className={`py-2.5 px-3 font-mono ${isExternalPayer(e.payer) ? "text-ink-soft" : "text-burgundy"}`}>
-                    {isExternalPayer(e.payer) ? formatMoney(e.amount) : `−${formatMoney(e.amount)}`}
-                  </td>
-                  <td className="py-2.5 px-3 text-ink-soft text-[11px]">
-                    {e.start_month ? monthLabel(e.start_month) : <em>Always</em>}
-                    {(e.start_month || e.end_month) && " → "}
-                    {e.end_month ? monthLabel(e.end_month) : e.start_month ? <em>Open</em> : ""}
-                  </td>
-                  <td className="py-2.5 px-3">
-                    <button onClick={(ev) => { ev.stopPropagation(); onDelete(e); }} className="opacity-0 group-hover:opacity-100 text-ink-soft hover:text-burgundy text-[16px] transition-opacity">×</button>
-                  </td>
-                </tr>
-              ))}
+              {rows.map((e) => {
+                const hasBreakdown = (e.breakdown_items?.length ?? 0) > 0;
+                const isExpanded = expandedId === e.id;
+                return (
+                  <Fragment key={e.id}>
+                    <tr className="border-t border-line/50 hover:bg-cream/40 cursor-pointer group" onClick={() => onEdit(e)}>
+                      <td className="py-2.5 px-3 font-medium text-ink">
+                        <div className="flex items-center gap-1.5">
+                          {hasBreakdown && (
+                            <button
+                              type="button"
+                              onClick={(ev) => { ev.stopPropagation(); setExpandedId(isExpanded ? null : e.id); }}
+                              className={`text-[10px] w-4 h-4 flex items-center justify-center rounded transition-transform shrink-0 text-ink-soft hover:text-ink ${isExpanded ? "rotate-90" : ""}`}
+                              title="Show breakdown"
+                            >
+                              ▶
+                            </button>
+                          )}
+                          {e.name}
+                          {e.expense_type === "credit" && <span className="ml-1 text-[9px] bg-gold/15 text-gold rounded px-1.5 py-0.5 font-medium">Credit</span>}
+                          {hasBreakdown && <span className="text-[9px] bg-line text-ink-soft rounded px-1.5 py-0.5 font-medium">{e.breakdown_items.length} items</span>}
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-ink-soft">{e.category ?? "—"}</td>
+                      <td className="py-2.5 px-3 text-ink-soft">{payerLabel(e.payer, e.payer_groom_pct)}</td>
+                      <td className={`py-2.5 px-3 font-mono ${isExternalPayer(e.payer) ? "text-ink-soft" : "text-burgundy"}`}>
+                        {isExternalPayer(e.payer) ? formatMoney(e.amount) : `−${formatMoney(e.amount)}`}
+                      </td>
+                      <td className="py-2.5 px-3 text-ink-soft text-[11px]">
+                        {e.start_month ? monthLabel(e.start_month) : <em>Always</em>}
+                        {(e.start_month || e.end_month) && " → "}
+                        {e.end_month ? monthLabel(e.end_month) : e.start_month ? <em>Open</em> : ""}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <button onClick={(ev) => { ev.stopPropagation(); onDelete(e); }} className="opacity-0 group-hover:opacity-100 text-ink-soft hover:text-burgundy text-[16px] transition-opacity">×</button>
+                      </td>
+                    </tr>
+                    {isExpanded && hasBreakdown && (
+                      <tr className="bg-cream/50">
+                        <td colSpan={6} className="px-6 pb-3 pt-1">
+                          <div className="border-l-2 border-gold/40 pl-3 flex flex-col gap-1">
+                            {e.breakdown_items.map((item, idx) => {
+                              const pct = e.amount > 0 ? (item.amount / e.amount) * 100 : 0;
+                              return (
+                                <div key={idx} className="flex items-center gap-3 text-[12px]">
+                                  <span className="text-ink-soft w-3.5 shrink-0">·</span>
+                                  <span className="flex-1 text-ink">{item.label}</span>
+                                  <span className="font-mono text-ink-soft text-[11px]">{pct.toFixed(0)}%</span>
+                                  <span className={`font-mono font-medium w-20 text-right ${isExternalPayer(e.payer) ? "text-ink-soft" : "text-burgundy"}`}>
+                                    {isExternalPayer(e.payer) ? formatMoney(item.amount) : `−${formatMoney(item.amount)}`}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                            {(() => {
+                              const assigned = e.breakdown_items.reduce((s, i) => s + i.amount, 0);
+                              const diff = e.amount - assigned;
+                              if (Math.abs(diff) < 0.01) return null;
+                              return (
+                                <div className="text-[11px] text-ink-soft italic mt-0.5">
+                                  {diff > 0 ? `${formatMoney(diff)} unassigned` : `${formatMoney(-diff)} over total`}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
               {rows.length === 0 && <tr><td colSpan={6} className="py-8 text-center text-ink-soft italic text-[13px]">No results.</td></tr>}
             </tbody>
           </table>

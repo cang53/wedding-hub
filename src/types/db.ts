@@ -41,6 +41,11 @@ export type ExpensePayer = LifePerson | "gift" | "free";
 export type StartingCashMode = "manual" | "from_wedding";
 export type ExpenseType = "fixed" | "credit";
 
+export interface ExpenseBreakdownItem {
+  label: string;
+  amount: number;
+}
+
 // ====== Row shapes ===============================================================
 
 export interface TodoRow {
@@ -169,6 +174,7 @@ export interface LifeExpenseRow {
   credit_interest_rate: number | null;
   day_of_month: number | null;
   notes: string | null;
+  breakdown_items: ExpenseBreakdownItem[];
   created_at: string;
   updated_at: string;
 }
@@ -505,6 +511,7 @@ export type Database = {
           credit_interest_rate?: number | null;
           day_of_month?: number | null;
           notes?: string | null;
+          breakdown_items?: ExpenseBreakdownItem[];
           created_at?: string;
           updated_at?: string;
         };
@@ -523,6 +530,7 @@ export type Database = {
           credit_interest_rate?: number | null;
           day_of_month?: number | null;
           notes?: string | null;
+          breakdown_items?: ExpenseBreakdownItem[];
           created_at?: string;
           updated_at?: string;
         };

@@ -1,7 +1,7 @@
 "use server";
 
 import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
-import type { ExpensePayer, ExpenseType, LifePerson, LifePurchaseOptionRow, LifePurchaseRow, StartingCashMode } from "@/types/db";
+import type { ExpenseBreakdownItem, ExpensePayer, ExpenseType, LifePerson, LifePurchaseOptionRow, LifePurchaseRow, StartingCashMode } from "@/types/db";
 
 const VALID_PERSONS: LifePerson[] = ["bride", "groom", "both"];
 // Expenses additionally allow "gift"/"free" (covered externally — no cost to the couple).
@@ -82,6 +82,20 @@ function calcMonthlyPayment(principal: number, months: number, annualRate: numbe
   return (principal * r * Math.pow(1 + r, months)) / (Math.pow(1 + r, months) - 1);
 }
 
+function parseBreakdownItems(form: FormData): ExpenseBreakdownItem[] {
+  const raw = String(form.get("breakdown_items_json") ?? "").trim();
+  if (!raw) return [];
+  let arr: unknown;
+  try { arr = JSON.parse(raw); } catch { return []; }
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((o) => {
+      const r = o as Record<string, unknown>;
+      return { label: String(r.label ?? "").trim(), amount: Number(r.amount) || 0 };
+    })
+    .filter((o) => o.label.length > 0 && o.amount >= 0);
+}
+
 function parseExpense(form: FormData) {
   const name = String(form.get("name") ?? "").trim();
   const category = String(form.get("category") ?? "").trim() || null;
@@ -90,6 +104,7 @@ function parseExpense(form: FormData) {
   const expense_type = String(form.get("expense_type") ?? "fixed") as ExpenseType;
   const rawDay = parseInt(String(form.get("day_of_month") ?? ""), 10);
   const day_of_month = !isNaN(rawDay) && rawDay >= 1 && rawDay <= 31 ? rawDay : null;
+  const breakdown_items = parseBreakdownItems(form);
 
   if (!name) return { error: "Please enter a name." };
   if (!VALID_EXPENSE_PAYERS.includes(payer)) return { error: "Invalid payer." };
@@ -117,6 +132,7 @@ function parseExpense(form: FormData) {
       credit_months,
       credit_interest_rate,
       day_of_month,
+      breakdown_items,
     };
   }
 
@@ -134,6 +150,7 @@ function parseExpense(form: FormData) {
     credit_total: null, credit_months: null, credit_interest_rate: null,
     day_of_month,
     notes,
+    breakdown_items,
   };
 }
 
