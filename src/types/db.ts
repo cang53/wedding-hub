@@ -232,6 +232,75 @@ export interface WeddingDayEventRow {
   updated_at: string;
 }
 
+// ====== Trip Scenario Planner (Honeymoon tab) ===================================
+
+/** Pastel color tokens for scenario badges (kept off the main palette). */
+export type ScenarioColor =
+  | "sage"
+  | "blush"
+  | "sky"
+  | "lavender"
+  | "sand"
+  | "mint"
+  | "peach";
+
+/** Booking platforms with color-coded badges; "Other" is the catch-all. */
+export type AccommodationPlatform =
+  | "Booking"
+  | "Airbnb"
+  | "TripAdvisor"
+  | "Other";
+
+export interface TripScenarioRow {
+  id: string;
+  name: string;
+  description: string | null;
+  is_selected: boolean;
+  promo_code: string | null;
+  promo_amount: number;
+  color: ScenarioColor;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TripStageRow {
+  id: string;
+  scenario_id: string;
+  order_index: number;
+  name: string;
+  destination: string | null;
+  nights: number;
+  date_from: string | null;
+  date_to: string | null;
+  notes: string | null;
+  emoji: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StageAccommodationRow {
+  id: string;
+  stage_id: string;
+  name: string;
+  platform: AccommodationPlatform;
+  url: string | null;
+  price_total: number | null;
+  price_per_night: number | null;
+  rating: number | null;
+  rating_count: number | null;
+  breakfast: boolean;
+  pool: boolean;
+  ac: boolean;
+  halal_nearby: boolean;
+  pros: string | null;
+  cons: string | null;
+  notes: string | null;
+  is_chosen: boolean;
+  image_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ====== Database type — supabase-js v2.49+ shape =================================
 
 export type Database = {
@@ -624,6 +693,128 @@ export type Database = {
           updated_at?: string;
         };
         Relationships: [];
+      };
+      trip_scenarios: {
+        Row: TripScenarioRow;
+        Insert: {
+          id?: string;
+          name: string;
+          description?: string | null;
+          is_selected?: boolean;
+          promo_code?: string | null;
+          promo_amount?: number;
+          color?: ScenarioColor;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          description?: string | null;
+          is_selected?: boolean;
+          promo_code?: string | null;
+          promo_amount?: number;
+          color?: ScenarioColor;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      trip_stages: {
+        Row: TripStageRow;
+        Insert: {
+          id?: string;
+          scenario_id: string;
+          order_index?: number;
+          name: string;
+          destination?: string | null;
+          nights?: number;
+          date_from?: string | null;
+          date_to?: string | null;
+          notes?: string | null;
+          emoji?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          scenario_id?: string;
+          order_index?: number;
+          name?: string;
+          destination?: string | null;
+          nights?: number;
+          date_from?: string | null;
+          date_to?: string | null;
+          notes?: string | null;
+          emoji?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "trip_stages_scenario_id_fkey";
+            columns: ["scenario_id"];
+            isOneToOne: false;
+            referencedRelation: "trip_scenarios";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      stage_accommodations: {
+        Row: StageAccommodationRow;
+        Insert: {
+          id?: string;
+          stage_id: string;
+          name: string;
+          platform?: AccommodationPlatform;
+          url?: string | null;
+          price_total?: number | null;
+          price_per_night?: number | null;
+          rating?: number | null;
+          rating_count?: number | null;
+          breakfast?: boolean;
+          pool?: boolean;
+          ac?: boolean;
+          halal_nearby?: boolean;
+          pros?: string | null;
+          cons?: string | null;
+          notes?: string | null;
+          is_chosen?: boolean;
+          image_url?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          stage_id?: string;
+          name?: string;
+          platform?: AccommodationPlatform;
+          url?: string | null;
+          price_total?: number | null;
+          price_per_night?: number | null;
+          rating?: number | null;
+          rating_count?: number | null;
+          breakfast?: boolean;
+          pool?: boolean;
+          ac?: boolean;
+          halal_nearby?: boolean;
+          pros?: string | null;
+          cons?: string | null;
+          notes?: string | null;
+          is_chosen?: boolean;
+          image_url?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "stage_accommodations_stage_id_fkey";
+            columns: ["stage_id"];
+            isOneToOne: false;
+            referencedRelation: "trip_stages";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       allowed_emails: {
         Row: { email: string; created_at: string };
