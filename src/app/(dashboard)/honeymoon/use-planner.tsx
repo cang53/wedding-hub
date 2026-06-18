@@ -146,7 +146,15 @@ export function PlannerProvider({
 
   // -- accommodations ------------------------------------------------------
   const addAccommodation: PlannerApi["addAccommodation"] = async (scenarioId, stageId) => {
-    const res = await api.createAccommodation(stageId, { name: "New option", platform: "Booking" });
+    // Auto-choose the first option in an otherwise empty stage so the stage
+    // immediately contributes to the scenario total.
+    const stage = scenarios.find((s) => s.id === scenarioId)?.stages.find((st) => st.id === stageId);
+    const isFirst = (stage?.accommodations.length ?? 0) === 0;
+    const res = await api.createAccommodation(stageId, {
+      name: "New option",
+      platform: "Booking",
+      is_chosen: isFirst,
+    });
     if (!("ok" in res)) return;
     mapStage(scenarioId, stageId, (st) => ({
       ...st,

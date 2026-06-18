@@ -13,6 +13,9 @@ import {
   chosenAccommodation,
   scenarioTotal,
   scenarioNet,
+  num,
+  nightsBetween,
+  perNight,
 } from "./types";
 
 export function ScenarioDetail({
@@ -117,7 +120,7 @@ export function ScenarioDetail({
               />
             </span>
             <span className="text-sage">
-              −<InlineNumber value={scenario.promo_amount} onCommit={(v) => patchScenario(scenario.id, { promo_amount: v ?? 0 })} /> €
+              −<InlineNumber value={num(scenario.promo_amount)} onCommit={(v) => patchScenario(scenario.id, { promo_amount: v ?? 0 })} /> €
             </span>
           </div>
           <div className="flex justify-between items-baseline pt-1 border-t border-line/60">
@@ -147,11 +150,40 @@ function StageCard({
   onDragEnd: () => void;
   onDropOn: () => void;
 }) {
-  const { patchStage, removeStage, addAccommodation } = usePlanner();
+  const { patchStage, removeStage, addAccommodation, patchAccommodation } = usePlanner();
   const [collapsed, setCollapsed] = useState(false);
   const chosen = chosenAccommodation(stage);
+  const nights = num(stage.nights);
 
   const patch = (p: Partial<TripStageRow>) => patchStage(scenarioId, stage.id, p);
+
+  /** Re-derive each accommodation's per-night price for a new night count. */
+  const repriceFor = (newNights: number) => {
+    for (const acc of stage.accommodations) {
+      patchAccommodation(scenarioId, stage.id, acc.id, {
+        price_per_night: perNight(acc.price_total, newNights),
+      });
+    }
+  };
+
+  const setNights = (n: number | null) => {
+    const next = n ?? 0;
+    patch({ nights: next });
+    repriceFor(next);
+  };
+
+  /** Editing a date auto-computes nights (and reprices) when both are set. */
+  const setDate = (key: "date_from" | "date_to", value: string | null) => {
+    const from = key === "date_from" ? value : stage.date_from;
+    const to = key === "date_to" ? value : stage.date_to;
+    const computed = nightsBetween(from, to);
+    if (computed != null) {
+      patch({ [key]: value, nights: computed } as Partial<TripStageRow>);
+      repriceFor(computed);
+    } else {
+      patch({ [key]: value } as Partial<TripStageRow>);
+    }
+  };
 
   return (
     <div
@@ -189,7 +221,7 @@ function StageCard({
             <InlineText value={stage.destination ?? ""} onCommit={(v) => patch({ destination: v || null })} placeholder="destination" />
             <span>·</span>
             <span className="flex items-center gap-1">
-              <InlineNumber value={stage.nights} onCommit={(v) => patch({ nights: v ?? 0 })} /> nights
+              <InlineNumber value={nights} onCommit={setNights} /> nights
             </span>
           </div>
         </div>
@@ -215,14 +247,14 @@ function StageCard({
             <input
               type="date"
               value={stage.date_from ?? ""}
-              onChange={(e) => patch({ date_from: e.target.value || null })}
+              onChange={(e) => setDate("date_from", e.target.value || null)}
               className="rounded-[2px] border border-line bg-paper px-1.5 py-0.5"
             />
             <span>→</span>
             <input
               type="date"
               value={stage.date_to ?? ""}
-              onChange={(e) => patch({ date_to: e.target.value || null })}
+              onChange={(e) => setDate("date_to", e.target.value || null)}
               className="rounded-[2px] border border-line bg-paper px-1.5 py-0.5"
             />
           </div>
@@ -239,7 +271,7 @@ function StageCard({
           {/* Accommodations */}
           <div className="space-y-2">
             {stage.accommodations.map((acc) => (
-              <AccommodationCard key={acc.id} scenarioId={scenarioId} stageId={stage.id} acc={acc} />
+              <AccommodationCard key={acc.id} scenarioId={scenarioId} stageId={stage.id} nights={nights} acc={acc} />
             ))}
           </div>
 

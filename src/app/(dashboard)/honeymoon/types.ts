@@ -16,6 +16,19 @@ export interface ScenarioWithStages extends TripScenarioRow {
   stages: StageWithAccommodations[];
 }
 
+// ---- Numeric helpers -------------------------------------------------------
+//
+// PostgREST returns `numeric` columns as strings (price_total, price_per_night,
+// rating, promo_amount). Coerce everywhere we do math so totals add instead of
+// string-concatenating.
+
+/** Coerce a possibly-string numeric (or null) to a number, defaulting to 0. */
+export function num(v: number | string | null | undefined): number {
+  if (v == null || v === "") return 0;
+  const n = Number(v);
+  return Number.isNaN(n) ? 0 : n;
+}
+
 // ---- Display helpers -------------------------------------------------------
 
 /** Pastel palette for scenario badges — deliberately off the main palette. */
@@ -58,15 +71,30 @@ export function chosenAccommodation(
 export function scenarioTotal(scenario: ScenarioWithStages): number {
   return scenario.stages.reduce((sum, stage) => {
     const chosen = chosenAccommodation(stage);
-    return sum + (chosen?.price_total ?? 0);
+    return sum + num(chosen?.price_total);
   }, 0);
 }
 
 /** Total after subtracting the promo amount (never below zero). */
 export function scenarioNet(scenario: ScenarioWithStages): number {
-  return Math.max(0, scenarioTotal(scenario) - (scenario.promo_amount ?? 0));
+  return Math.max(0, scenarioTotal(scenario) - num(scenario.promo_amount));
 }
 
 export function totalNights(scenario: ScenarioWithStages): number {
-  return scenario.stages.reduce((sum, s) => sum + (s.nights ?? 0), 0);
+  return scenario.stages.reduce((sum, s) => sum + num(s.nights), 0);
+}
+
+/** Nights between two ISO dates, or null if either is missing. */
+export function nightsBetween(from: string | null, to: string | null): number | null {
+  if (!from || !to) return null;
+  const diff = new Date(to).getTime() - new Date(from).getTime();
+  const n = Math.round(diff / 86_400_000);
+  return n >= 0 ? n : null;
+}
+
+/** Per-night price: explicit value if set, else derived from total ÷ nights. */
+export function perNight(priceTotal: number | string | null, nights: number): number | null {
+  const total = num(priceTotal);
+  if (total <= 0 || nights <= 0) return null;
+  return Math.round(total / nights);
 }

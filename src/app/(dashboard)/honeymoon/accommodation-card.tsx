@@ -5,7 +5,7 @@ import type { StageAccommodationRow, AccommodationPlatform } from "@/types/db";
 import { formatMoney, cn } from "@/lib/utils";
 import { usePlanner } from "./use-planner";
 import { InlineText, InlineNumber } from "./inline-edit";
-import { PLATFORM_BADGES, PLATFORMS } from "./types";
+import { PLATFORM_BADGES, PLATFORMS, num, perNight } from "./types";
 
 const AMENITIES: { key: keyof StageAccommodationRow; icon: string; label: string }[] = [
   { key: "breakfast", icon: "🍳", label: "Breakfast" },
@@ -17,10 +17,12 @@ const AMENITIES: { key: keyof StageAccommodationRow; icon: string; label: string
 export function AccommodationCard({
   scenarioId,
   stageId,
+  nights,
   acc,
 }: {
   scenarioId: string;
   stageId: string;
+  nights: number;
   acc: StageAccommodationRow;
 }) {
   const { patchAccommodation, removeAccommodation, choose } = usePlanner();
@@ -29,7 +31,12 @@ export function AccommodationCard({
   const patch = (p: Partial<StageAccommodationRow>) =>
     patchAccommodation(scenarioId, stageId, acc.id, p);
 
+  /** When the total changes, recompute the per-night price automatically. */
+  const patchTotal = (total: number | null) =>
+    patch({ price_total: total, price_per_night: perNight(total, nights) });
+
   const badge = PLATFORM_BADGES[acc.platform] ?? PLATFORM_BADGES.Other;
+  const displayPerNight = acc.price_per_night != null ? num(acc.price_per_night) : perNight(acc.price_total, nights);
 
   return (
     <div
@@ -68,14 +75,14 @@ export function AccommodationCard({
         <div className="text-right shrink-0">
           <div className="font-serif text-[18px] leading-none">
             <InlineNumber
-              value={acc.price_total}
-              onCommit={(v) => patch({ price_total: v })}
+              value={acc.price_total != null ? num(acc.price_total) : null}
+              onCommit={patchTotal}
               placeholder="—"
             />
             <span className="text-xs text-ink-soft"> €</span>
           </div>
-          {acc.price_per_night != null && (
-            <div className="text-[11px] text-ink-soft">{formatMoney(acc.price_per_night)}/night</div>
+          {displayPerNight != null && (
+            <div className="text-[11px] text-ink-soft">{formatMoney(displayPerNight)}/night</div>
           )}
         </div>
 
@@ -112,14 +119,14 @@ export function AccommodationCard({
             </label>
             <span className="flex items-center gap-1 text-xs text-ink-soft">
               ⭐
-              <InlineNumber value={acc.rating} onCommit={(v) => patch({ rating: v })} placeholder="?" />
+              <InlineNumber value={acc.rating != null ? num(acc.rating) : null} onCommit={(v) => patch({ rating: v })} placeholder="?" />
               /
               <InlineNumber value={acc.rating_count} onCommit={(v) => patch({ rating_count: v })} placeholder="0" />
               <span>avis</span>
             </span>
             <span className="flex items-center gap-1 text-xs text-ink-soft">
               €/night:
-              <InlineNumber value={acc.price_per_night} onCommit={(v) => patch({ price_per_night: v })} placeholder="—" />
+              <InlineNumber value={displayPerNight} onCommit={(v) => patch({ price_per_night: v })} placeholder="—" />
             </span>
           </div>
 
