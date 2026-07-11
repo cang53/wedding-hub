@@ -35,9 +35,37 @@ interface Props {
   initialGuests: GuestRow[];
 }
 
+type SortKey = "name" | "side" | "category" | "plus_one" | "rsvp" | "invited";
+type SortDir = "asc" | "desc";
+
+// Rank order for RSVP so sorting follows a meaningful progression.
+const RSVP_RANK: Record<GuestRsvp, number> = { yes: 0, pending: 1, no: 2 };
+
+function compareGuests(a: GuestRow, b: GuestRow, key: SortKey): number {
+  switch (key) {
+    case "name":
+      return a.name.localeCompare(b.name);
+    case "side":
+      return a.side.localeCompare(b.side);
+    case "category":
+      return (a.category ?? "").localeCompare(b.category ?? "");
+    case "plus_one":
+      // Guests with a plus one sort first (true before false).
+      return Number(b.plus_one) - Number(a.plus_one);
+    case "rsvp":
+      return RSVP_RANK[a.rsvp] - RSVP_RANK[b.rsvp];
+    case "invited":
+      return Number(b.invited) - Number(a.invited);
+    default:
+      return 0;
+  }
+}
+
 export function GuestsClient({ initialGuests }: Props) {
   const [guests, setGuests] = useState<GuestRow[]>(initialGuests);
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<GuestRow | null>(null);
   const [, startTransition] = useTransition();
@@ -74,7 +102,21 @@ export function GuestsClient({ initialGuests }: Props) {
     ? guests.filter((g) => g.category === categoryFilter)
     : guests;
 
-  const sorted = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = [...filtered].sort((a, b) => {
+    const cmp = compareGuests(a, b, sortKey);
+    // Stable tie-break on name so equal keys keep a predictable order.
+    const resolved = cmp !== 0 ? cmp : a.name.localeCompare(b.name);
+    return sortDir === "asc" ? resolved : -resolved;
+  });
+
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
 
   const handleDelete = (g: GuestRow) => {
     if (!confirm(`Delete "${g.name}"?`)) return;
@@ -148,12 +190,12 @@ export function GuestsClient({ initialGuests }: Props) {
             <table className="guest-table w-full">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Side</th>
-                  <th>Category</th>
-                  <th>Plus 1</th>
-                  <th>RSVP</th>
-                  <th>Invite</th>
+                  <SortHeader label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortHeader label="Side" sortKey="side" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortHeader label="Category" sortKey="category" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortHeader label="Plus 1" sortKey="plus_one" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortHeader label="RSVP" sortKey="rsvp" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortHeader label="Invite" sortKey="invited" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <th></th>
                 </tr>
               </thead>
@@ -197,6 +239,32 @@ export function GuestsClient({ initialGuests }: Props) {
         editing={editing}
       />
     </section>
+  );
+}
+
+function SortHeader({
+  label, sortKey, activeKey, dir, onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  activeKey: SortKey;
+  dir: SortDir;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = activeKey === sortKey;
+  return (
+    <th aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className="inline-flex items-center gap-1 uppercase tracking-[0.15em] font-semibold text-[11px] hover:text-burgundy transition-colors"
+      >
+        {label}
+        <span className={`text-[9px] leading-none ${active ? "opacity-100" : "opacity-30"}`}>
+          {active ? (dir === "asc" ? "▲" : "▼") : "▲"}
+        </span>
+      </button>
+    </th>
   );
 }
 
