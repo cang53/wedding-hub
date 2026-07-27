@@ -1,0 +1,329 @@
+# Handoff: Apple-style redesign of Wedding Hub
+
+Target repo: `cang53/wedding-hub` (Next.js App Router + Tailwind + Supabase), branch `main`.
+
+## Overview
+
+Wedding Hub is currently a cream/burgundy/gold "editorial" app: a serif display face, a large
+`Celal & Selver` masthead, a pill tab row, and heavy use of emoji and coloured badges. This handoff
+replaces that visual language with an Apple-style system — SF typography, inset grouped lists,
+hairline separators, near-monochrome surfaces, and colour used only where it carries meaning.
+
+Scope of the redesign: **five screens** — Overview (`/dashboard`), Life after (`/life-budget`),
+Honeymoon (`/honeymoon`), Guests (`/guests`), The day (`/wedding-day`). To-Do, Agenda and
+Apartments are out of scope but should adopt the same tokens and list patterns.
+
+**No behaviour changes are requested.** Every server action, Supabase query, realtime channel and
+dialog keeps working exactly as it does today. This is a presentation-layer change.
+
+## About the design files
+
+`Wedding Hub - Apple v2.dc.html` in this bundle is a **design reference written as a single
+self-contained HTML prototype** (plus its `support.js` runtime). Open it in a browser to see the
+intended look and behaviour. It is **not production code to copy**: it uses inline styles, a custom
+template runtime, and hard-coded sample data.
+
+Your task is to **recreate this design inside the existing Next.js + Tailwind codebase**, using its
+established patterns: server components for data, `"use client"` clients for interaction,
+`src/components/ui/*` primitives, and `src/app/globals.css` for tokens. Port the *visual system and
+layout*, not the file.
+
+`Wedding Hub - Apple.dc.html` (v1) also exists in the project but is superseded — ignore it.
+
+## Fidelity
+
+**High-fidelity.** Colours, type sizes, weights, letter-spacing, radii and spacing in this document
+are final. Match them. Where the prototype and this README disagree, this README wins.
+
+---
+
+## Design tokens
+
+Replace the existing palette in `src/app/globals.css`. Keep the variable names below; they map onto
+Apple's system colours rather than the current cream/burgundy set.
+
+### Colour — light
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `--bg` | `#f2f2f7` | Page background (grouped style) |
+| `--card` | `#ffffff` | List group / card surface |
+| `--fg` | `#000000` | Primary text |
+| `--fg2` | `#6c6c70` | Secondary text, group labels |
+| `--fg3` | `#a1a1a6` | Tertiary text, disabled |
+| `--sep` | `rgba(60,60,67,.17)` | Hairline separators, borders |
+| `--fill` | `rgba(120,120,128,.14)` | Segmented-control track, chips, bar fills |
+| `--accent` | `#c2415f` | The single accent (rose, carried over from the wedding palette) |
+| `--green` | `#2f9e4f` | RSVP confirmed |
+| `--red` | `#c9332b` | RSVP declined |
+| `--amber` | `#a67512` | RSVP pending |
+| `--nav` | `rgba(246,246,248,.8)` | Sidebar / header material (with backdrop blur) |
+
+### Colour — dark (`[data-theme="dark"]`)
+
+| Token | Value |
+| --- | --- |
+| `--bg` | `#000000` |
+| `--card` | `#1c1c1e` |
+| `--fg` | `#ffffff` |
+| `--fg2` | `#98989e` |
+| `--fg3` | `#6c6c70` |
+| `--sep` | `rgba(84,84,88,.6)` |
+| `--fill` | `rgba(120,120,128,.24)` |
+| `--accent` | `#ff6f8d` |
+| `--green` | `#30d158` · `--red` `#ff453a` · `--amber` `#ffd60a` |
+| `--nav` | `rgba(20,20,22,.8)` |
+
+Set `color-scheme: light` / `dark` on `:root` so native form controls and scrollbars follow.
+
+### Variant: "plain" (optional second direction)
+
+`[data-flavor="plain"]` flattens the grouped style: `--bg: #ffffff` (`#000000` dark),
+`--card` equal to `--bg`, radius `0`, and each group gains a 1px top and bottom hairline instead of
+a rounded card. Implement only if you want the toggle; `grouped` is the default and the
+recommended one.
+
+### Typography
+
+Font stack (no webfont — SF on Apple platforms, system UI elsewhere):
+
+```
+-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+"Helvetica Neue", "Segoe UI", sans-serif
+```
+
+Delete the serif display face and every `font-serif` / `<em>` decorative usage.
+
+| Role | Size | Weight | Letter-spacing | Colour |
+| --- | --- | --- | --- | --- |
+| Screen title (header) | `clamp(26px, 3.4vw, 34px)` | 700 | `-.026em` | `--fg` |
+| Hero figure (countdown, money, guest count) | `clamp(38px, 6vw, 54px)`; countdown `clamp(60px, 10vw, 96px)` | 700 | `-.04em` / `-.05em` | `--fg` |
+| Hero caption | 16px | 400 | `-.012em` | `--fg2` |
+| Group label (above a list) | 13px | 400 | `-.004em` | `--fg2` |
+| List row primary | 17px | 400 (590 for times) | `-.014em` | `--fg` |
+| List row secondary | 14px | 400 | `-.008em` | `--fg2` |
+| Row trailing value | 17px | 400 | `-.014em` | `--fg2` |
+| Card title (scenario) | 24px | 680 | `-.03em` | `--fg` |
+| Price | 28px | 680 | `-.035em` | `--fg` |
+| Segmented control | 14px | 450 / 590 active | `-.01em` | `--fg` |
+| Uppercase tag | 12px | 600 | `.05em`, uppercase | `--fg3` / `--accent` |
+
+All numeric values use `font-variant-numeric: tabular-nums`.
+
+### Spacing, radius, elevation
+
+- Radius: `12px` list groups and cards; `9px` segmented-control track; `7px` segment; `8px` sidebar
+  nav item; `999px` filter chips and the appearance switch.
+- Content padding: `22px clamp(16px,3vw,40px) 120px`, `max-width: 1000px`.
+- Vertical rhythm between sections: `24–30px` (`gap` on a flex column, not margins).
+- Row padding: `12px 18px`.
+- Group label padding: `0 18px 7px`.
+- **No box-shadows on content.** The only shadows are `0 1px 2px rgba(0,0,0,.16)` on the active
+  segment and `0 1px 3px rgba(0,0,0,.3)` on the switch knob.
+- Chrome material: `background: var(--nav)` + `backdrop-filter: saturate(180%) blur(22px)`
+  (with `-webkit-` prefix) + a 1px `--sep` edge.
+
+### The inset hairline (important)
+
+Separators must stop short of the card's left edge, Apple-style. Do **not** put a border on the row
+itself. Structure every list group as:
+
+```html
+<div class="group">                 <!-- background var(--card), radius 12, overflow hidden -->
+  <div style="padding-left:18px">   <!-- outer: left pad only -->
+    <div style="padding:12px 18px 12px 0; border-top:1px solid var(--sep)">
+      …row content…                 <!-- inner: border-top omitted on the FIRST row -->
+    </div>
+  </div>
+</div>
+```
+
+---
+
+## Shell
+
+### Desktop (≥ 900px) — sidebar
+
+- `position: sticky; top: 0; height: 100vh; width: 236px;` padding `20px 12px`, nav material,
+  1px right hairline.
+- Top block: `Celal & Selver` 17px/600/`-.02em`; `5 September 2026` 13px `--fg2`.
+- Nav items: full-width buttons, `padding: 8px 10px`, radius 8, 15px, `-.014em`. Inactive
+  `font-weight: 440`, colour `--fg`, transparent. Active `font-weight: 590`, colour `--accent`,
+  background `--fill`. Hover: background `--fill`.
+  Labels: Overview · Life after · Honeymoon · Guests · The day.
+  **Text only — no icons.**
+- Bottom: `Dark` label (13px `--fg2`) + appearance switch, pushed down with `margin-top: auto`.
+
+### Mobile (< 900px) — bottom tab bar
+
+`position: fixed; bottom: 0`, nav material, 1px top hairline,
+`padding: 9px 4px calc(9px + env(safe-area-inset-bottom))`. Five equal-flex text buttons, 12px,
+active `--accent`/600, inactive `--fg2`/450. Short labels: Overview · Life · Trip · Guests · Day.
+The appearance switch moves into the header on mobile.
+
+Breakpoint is a real media query in Tailwind (`lg:`); the prototype uses a JS width listener only
+because it cannot write media queries.
+
+### Header (both)
+
+Sticky, `z-index: 20`, `padding: 16px clamp(16px,3vw,40px) 12px`, nav material, 1px bottom hairline.
+Left: screen title. Right: a **borderless text button** in `--accent` at 16px/400 — not a filled
+pill. Labels per screen: Add task · Add line · New scenario · Add guest · Add event.
+
+### Appearance switch
+
+47×28 pill, radius 999. Track `--fill` off / `--accent` on. Knob 24×24 white circle at `top:2px;
+left:2px`, `transform: translateX(19px)` when on, transition
+`.22s cubic-bezier(.4,1.25,.5,1)`. Writes `data-theme` on `<html>`; persist the choice.
+
+---
+
+## Screens
+
+### 1. Overview (`/dashboard`)
+
+Column, `gap: 30px`.
+
+1. **Countdown.** `daysUntil(WEDDING_DATE)` at `clamp(60px,10vw,96px)`/700/`-.05em`/`line-height:.86`
+   next to `days to go` at `clamp(19px,2.4vw,26px)`/600 in `--fg2`, baseline-aligned, `gap: 12px`.
+   Under it, 14px below: `Saturday 5 September 2026 · Antwerp`, 16px `--fg2`.
+   **Removed from the old design:** the progress bar and the invented "planning progress %".
+2. **Group "Where things stand"** — three rows, label left, value right in `--fg2`:
+   `Budget` → `€ 12.480 left`; `Guests` → `<yes> of <total> confirmed`; `Honeymoon` →
+   `3 scenarios, 1 chosen`. Every figure must be derived from the same queries the rest of the app
+   uses — no hard-coded counts (this was a defect in v1).
+3. **Group "Next up"** — five agenda rows: title 17px, secondary 14px `--fg2` (location/time),
+   date right-aligned 15px `--fg2`, `white-space: nowrap`.
+4. **Group "<n> tasks open"** (label reads `All done` at zero) — task rows are buttons.
+   Leading: 22px circle, `1.5px solid var(--sep)`; when checked, filled `--accent` with a white
+   `✓` at 12px/700. Text 17px, and when checked `color: var(--fg3); text-decoration: line-through`.
+   Trailing: priority word (High/Medium/Low) at 14px — High `--accent`, Medium `--fg2`,
+   Low `--fg3`; `opacity: .4` when checked. Hover on the row: `opacity: .72`.
+
+**The four KPI stat cards from the old dashboard are deleted.**
+
+### 2. Life after (`/life-budget`)
+
+Column, `gap: 28px`.
+
+1. **Segmented control** — `Household · Celal · Selver`. Track: `display:flex; padding:2px; gap:2px;
+   border-radius:9px; background:var(--fill); max-width:420px`. Segment: `flex:1; height:30px;
+   radius:7px`. Active: background `--card`, weight 590, `box-shadow:0 1px 2px rgba(0,0,0,.16)`.
+   (Keep the existing four-view model if you prefer — Calendar can be a fourth segment.)
+2. **Hero** — `€ 1.820 left over` at `clamp(38px,6vw,54px)`/700/`-.04em`, then 16px `--fg2`:
+   `€ 6.830 in · € 3.210 out · € 900 to savings, every month`. Values recompute per segment.
+3. **Group "Projected cash · Sep 2026 to Aug 2027"** — a padded card (`20px 18px 18px`) containing:
+   - 150px-tall flex row of 12 bars, `gap: clamp(3px,.9vw,9px)`, each `flex:1`,
+     `align-items:flex-end`. Bar: full width, `height: value/max × 100%`, `min-height:4px`,
+     `border-radius:2px`. Fill `--fill`, except months containing a planned purchase → `--accent`.
+     `title` attribute carries the formatted amount.
+   - A tick row under a 1px `--sep` rule (`padding-top:8px; margin-top:10px`): 11px `--fg3`
+     single-letter month initials, centred, same gap.
+   - Caption 13px `--fg2`, 12px below: `Ends at € X. Highlighted months carry a planned purchase.`
+4. **Group "Income each month"** — label + `who` secondary, amount right in `--fg` (not green;
+   colour is not needed to say "income").
+5. **Group "Costs each month"** — label, amount right in `--fg2`. **No per-row mini bar charts.**
+6. **Group "Planned purchases"** — label, secondary `October 2026 · two options shortlisted`,
+   amount right, nowrap.
+
+### 3. Honeymoon (`/honeymoon`)
+
+1. **Segmented control** — `Scenarios · Compare` (replaces the ghost "Compare" button).
+2. **Scenarios**: `grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px`.
+   Card = `--card` surface, radius 12, no shadow, `display:flex; flex-direction:column`.
+   Body padding `20px 20px 18px`, `gap: 14px`:
+   - Tag: 12px/600/`.05em`/uppercase — `Chosen` in `--accent` when selected, otherwise the pace
+     word (`Relaxed`/`Busy`/`Easy`) in `--fg3`.
+   - Name 24px/680/`-.03em`; description 15px `--fg2`.
+   - Route as plain text: `Naples · Positano · Capri` (15px). **No coloured chips, no dots, no
+     colour strip.**
+   - Meta 14px `--fg2`: `9 nights · flights € 780 · SUMMER26`.
+   - Price row pinned with `margin-top:auto`: net 28px/680 tabular; if discounted, the list price
+     beside it at 16px `--fg3` with `line-through`.
+   - Footer above a 1px `--sep`: `Edit` and `Duplicate` as `--accent` text buttons (15px), then
+     `Choose` pushed right with `margin-left:auto`. The chosen card shows `Chosen` at weight 590,
+     non-interactive, and the card itself gets `box-shadow: inset 0 0 0 1.5px var(--accent)`.
+3. **Compare**: one list group; each row is a grid `120px repeat(3, 1fr)` with the label 14px
+   `--fg2` and three right-aligned tabular cells at 15px. Header row (`Scenario`) has label in
+   `--fg`/600 and cells at 640. The chosen scenario's column renders in `--accent`.
+   Rows: Scenario · Nights · Stages · Pace · Flights · List price · You pay · Per night.
+
+### 4. Guests (`/guests`)
+
+1. **Hero** — `10 of 22 coming` at `clamp(38px,6vw,54px)`/700, then 16px `--fg2`:
+   `4 still to reply · 2 declined · 6 plus ones`. Below, 18px down: a single 6px stacked bar,
+   radius 3, `max-width: 520px`, background `--fill`, with three segments sized by proportion —
+   `--green` confirmed, `--amber` pending, `--red` declined, each with a `title`.
+   **The five stat cards are deleted.**
+2. **Filter chips** — `Everyone` plus each category. Height 30, radius 999, 14px. Inactive:
+   background `--fill`, colour `--fg`. Active: background `--fg`, colour `--bg`, weight 560.
+   No borders.
+3. **Guest list** — one group, one row per guest. Name 17px; secondary 14px `--fg2`
+   `Selver's side · plus Mehmet`. Trailing: a 7px dot in the RSVP colour + the word
+   `Coming` / `Pending` / `Declined` at 15px `--fg2`.
+   **No avatar circles, no uppercase tinted RSVP pills, no sortable table.** Keep sorting if you
+   want it, but as a header control rather than per-column arrows.
+
+### 5. The day (`/wedding-day`)
+
+1. **Segmented control** — `Both · Selver · Celal`. (Drop the emoji and the counts; drop the
+   `split` side-by-side view unless you specifically want to keep it — if kept, restyle its columns
+   with the same hairlines and no tinted blocks.)
+2. **Caption** — 16px `--fg2`: `12 events, 08:00 to 00:00`. Note `24:00` must render as `00:00`.
+   **The four stat cards are deleted.**
+3. **Phases** — one list group per phase, with the phase name as the group label
+   (`Morning`, `Ceremony`, `Afternoon`, `Dinner`, `Evening`). Drop the emoji, the italic
+   descriptions, the dashed rules, the event counts, and the per-phase colour coding.
+   Phase boundaries by start hour: `<11:15` Morning, `<15:00` Ceremony, `<18:00` Afternoon,
+   `<21:00` Dinner, else Evening. Empty phases are not rendered.
+   Row (`align-items: flex-start`): a 64px fixed column with start time 17px/590 tabular and
+   duration 13px `--fg3` beneath; then title 17px and `location · note` 14px `--fg2`; then, only
+   for bride/groom-specific events, `Selver` or `Celal` at 14px `--fg2` on the right. Events marked
+   `both` show nothing there — "together" is the default and needs no label.
+4. Keep the "happening now" banner logic, but restyle it: an `--accent` group label reading
+   `Happening now` above a normal list group, not a pulsing tinted box.
+
+---
+
+## Interactions
+
+| Interaction | Behaviour |
+| --- | --- |
+| Nav | Client-side route change; active item gets `--accent` + `--fill`. |
+| Appearance switch | Toggles `data-theme` on `<html>`; persist to `localStorage`; knob transition `.22s cubic-bezier(.4,1.25,.5,1)`. |
+| Segmented controls | Local state; the active segment's `--card` pill moves instantly (no slide animation needed). |
+| Task checkbox | Optimistic toggle, then the existing server action. Circle fill + strike-through are the only feedback. |
+| Filter chips | Local state, filters the list in place. |
+| Choose scenario | Existing `selectFinal` action; confirm dialog can stay. |
+| Row hover | `opacity: .72` on interactive rows; `background: var(--fill)` on nav items. Nothing else. |
+| Screen enter | The prototype's fade-up is **not** required — Apple's own apps don't do it. Drop `animate-in fade-in slide-in-from-bottom-2`. |
+
+Dialogs keep their current structure and server actions; restyle them to the tokens above:
+`--card` surface, radius 14, no serif titles, borderless `--accent` text buttons for Cancel/Save,
+17px labels, inputs with a `--fill` background and no border.
+
+## State
+
+Unchanged from today. Per screen: the existing Supabase-backed row state plus realtime channel,
+and local UI state for `segment`, `filter`, `theme`, `dialogOpen`, `editing`.
+
+## Assets
+
+None. No images, no icons, no webfonts — everything is type, hairlines and the four semantic
+colours. If you want icons later, use SF Symbols on Apple platforms or a thin 1.5px stroke set.
+
+## Files in this bundle
+
+- `Wedding Hub - Apple v2.dc.html` — the design reference. Open in a browser; use the Tweaks in the
+  preview to see `grouped` vs `plain` and light vs dark.
+- `support.js` — runtime the prototype needs to render. Not part of the handoff implementation.
+
+## Suggested order of work
+
+1. Swap the tokens and font stack in `src/app/globals.css`; add `[data-theme="dark"]`.
+2. Build two shared primitives — `ListGroup` (label + card + inset hairlines) and `Segmented` —
+   in `src/components/ui/`. Almost every screen is these two plus type.
+3. Rebuild the shell: sidebar, header, bottom tab bar, appearance switch.
+4. Port screens in this order: Guests (simplest), The day, Overview, Honeymoon, Life after.
+5. Restyle the shared dialog/input/select primitives.
+6. Apply the same patterns to To-Do, Agenda and Apartments.
