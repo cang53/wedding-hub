@@ -31,7 +31,13 @@ export function useHeaderAction() {
 export function usePageHeader(actionLabel?: string, onAction?: () => void) {
   const setAction = useContext(HeaderSetterContext);
   const onActionRef = useRef(onAction);
-  onActionRef.current = onAction;
+
+  // Refs are only safe to write outside of render — keep the latest
+  // closure here so the effect below doesn't need onAction as a dependency
+  // (a new function identity every render would otherwise re-fire it).
+  useEffect(() => {
+    onActionRef.current = onAction;
+  });
 
   useEffect(() => {
     if (!actionLabel) {

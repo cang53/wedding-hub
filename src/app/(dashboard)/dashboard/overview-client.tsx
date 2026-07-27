@@ -105,7 +105,15 @@ export function OverviewClient({ standing, upcoming, visibleTasks, otherOpenCoun
           visibleTasks.map((t) => {
             const checked = !!done[t.id];
             return (
-              <ListRow key={t.id} as="button" interactive onClick={() => toggle(t.id)}>
+              <ListRow
+                key={t.id}
+                as="button"
+                interactive
+                role="checkbox"
+                aria-checked={checked}
+                aria-label={t.text}
+                onClick={() => toggle(t.id)}
+              >
                 <span
                   className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-full border-[1.5px] text-[12px] font-bold text-white transition-colors"
                   style={{

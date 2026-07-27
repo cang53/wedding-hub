@@ -70,8 +70,8 @@ const DialogContent = React.forwardRef<
           ...style,
         }}
         className={cn(
-          "relative",
-          "border border-line bg-paper rounded-[4px] shadow-lifted",
+          "font-apple relative",
+          "bg-[var(--card)] text-[var(--fg)] rounded-[14px] shadow-[0_20px_60px_rgba(0,0,0,0.3)]",
           "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           className
         )}
@@ -81,7 +81,7 @@ const DialogContent = React.forwardRef<
           {children}
         </div>
         <DialogPrimitive.Close
-          className="absolute right-3 top-3 z-10 text-ink-soft transition-colors hover:text-ink focus:outline-none focus:ring-2 focus:ring-burgundy rounded-sm p-1.5 bg-paper"
+          className="absolute right-3 top-3 z-10 text-[var(--fg3)] transition-colors hover:text-[var(--fg)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] rounded-full p-1.5"
           aria-label="Close"
         >
           <X className="h-4 w-4" />
@@ -107,7 +107,7 @@ const DialogFooter = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "mt-6 flex justify-end gap-2.5 border-t border-line pt-5",
+      "mt-6 flex justify-end gap-5 border-t border-[var(--sep)] pt-5",
       className
     )}
     {...props}
@@ -122,7 +122,8 @@ const DialogTitle = React.forwardRef<
   <DialogPrimitive.Title
     ref={ref}
     className={cn(
-      "font-serif text-[28px] font-medium leading-tight text-ink",
+      "text-[20px] font-semibold leading-tight tracking-[-0.02em] text-[var(--fg)]",
+      "[&_em]:not-italic [&_em]:font-semibold [&_em]:text-[var(--fg)]",
       className
     )}
     {...props}
@@ -136,7 +137,7 @@ const DialogDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Description
     ref={ref}
-    className={cn("text-[13px] text-ink-soft", className)}
+    className={cn("text-[14px] text-[var(--fg2)]", className)}
     {...props}
   />
 ));

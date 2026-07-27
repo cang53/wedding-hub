@@ -285,8 +285,22 @@ export function WeddingDayClient({ initialItems }: Props) {
           {grouped.map(({ phase, events }) => (
             <ListGroup key={phase.key} label={phase.label}>
               {events.map((event) => (
-                <ListRow key={event.id} as="button" align="start" interactive className="group" onClick={() => { setEditing(event); setDialogOpen(true); }}>
-                  <EventRowContent event={event} onDelete={() => handleDelete(event)} />
+                <ListRow key={event.id} align="start" interactive className="group">
+                  <button
+                    type="button"
+                    onClick={() => { setEditing(event); setDialogOpen(true); }}
+                    className="flex flex-1 items-start gap-3.5 text-left"
+                  >
+                    <EventRowContent event={event} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Delete event"
+                    onClick={() => handleDelete(event)}
+                    className="mt-0.5 flex-none text-[15px] leading-none text-[var(--fg3)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--accent)]"
+                  >
+                    ×
+                  </button>
                 </ListRow>
               ))}
             </ListGroup>
@@ -339,12 +353,7 @@ function EventRow({ event }: { event: WeddingDayEventRow }) {
   );
 }
 
-function EventRowContent({
-  event, onDelete,
-}: {
-  event: WeddingDayEventRow;
-  onDelete?: () => void;
-}) {
+function EventRowContent({ event }: { event: WeddingDayEventRow }) {
   const sub = [event.location, event.notes].filter(Boolean).join(" · ");
   const badge = ASSIGNEE_LABEL[event.assignee];
   return (
@@ -360,16 +369,6 @@ function EventRowContent({
         {sub && <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">{sub}</div>}
       </div>
       {badge && <span className="text-[14px] whitespace-nowrap text-[var(--fg2)]">{badge}</span>}
-      {onDelete && (
-        <button
-          type="button"
-          aria-label="Delete event"
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="ml-1 text-[15px] leading-none text-[var(--fg3)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--accent)]"
-        >
-          ×
-        </button>
-      )}
     </>
   );
 }

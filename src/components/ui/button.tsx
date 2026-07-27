@@ -4,27 +4,28 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 /**
- * Button — matches prototype:
- *   default: ink bg, cream text, uppercase tracking-widest, 2px radius
- *   ghost:   transparent bg, ink text + border, fills on hover
- *   danger:  transparent, burgundy text, hover underline (no fill)
- *   outline: chip-style, used for filter chips and subtle CTAs
+ * Button — Apple redesign, used mainly inside dialogs (screens mostly use
+ * their own plain accent text buttons directly):
+ *   default: borderless --accent text, semibold — primary/submit actions
+ *   ghost:   borderless --accent text, regular weight — Cancel etc.
+ *   danger:  borderless --red text — destructive actions
+ *   outline: --fill pill — subtle secondary CTA
  */
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium uppercase tracking-[0.1em] transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-burgundy focus-visible:ring-offset-2 focus-visible:ring-offset-cream",
+  "font-apple inline-flex items-center justify-center gap-2 whitespace-nowrap tracking-[-0.01em] transition-opacity duration-150 disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2",
   {
     variants: {
       variant: {
-        default: "bg-ink text-cream rounded-[2px] hover:bg-burgundy hover:-translate-y-px",
-        ghost: "bg-transparent text-ink border border-ink rounded-[2px] hover:bg-ink hover:text-cream",
-        danger: "bg-transparent text-burgundy rounded-[2px] hover:text-burgundy-deep hover:underline",
-        outline: "bg-transparent text-ink-soft border border-line rounded-full hover:border-ink hover:text-ink",
-        link: "text-burgundy underline-offset-4 hover:underline",
+        default: "bg-transparent text-[var(--accent)] font-[590] rounded-none hover:opacity-60",
+        ghost: "bg-transparent text-[var(--accent)] font-normal rounded-none hover:opacity-60",
+        danger: "bg-transparent text-[var(--red)] font-normal rounded-none hover:opacity-60",
+        outline: "bg-[var(--fill)] text-[var(--fg)] rounded-full hover:opacity-80",
+        link: "text-[var(--accent)] underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-10 px-5 text-[12px]",
-        sm: "h-8 px-3.5 text-[11px]",
-        lg: "h-12 px-7 text-[13px]",
+        default: "h-10 px-2 text-[17px]",
+        sm: "h-8 px-1.5 text-[15px]",
+        lg: "h-12 px-2.5 text-[17px]",
         icon: "h-9 w-9 text-[14px]",
       },
     },
