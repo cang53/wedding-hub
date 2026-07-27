@@ -53,6 +53,14 @@ const RSVP_DOT: Record<GuestRsvp, string> = {
   pending: "var(--amber)",
 };
 
+// Tapping a row's RSVP pill advances it. Starting from the default
+// "pending", one tap gets you to "Coming" — by far the most common outcome.
+const NEXT_RSVP: Record<GuestRsvp, GuestRsvp> = {
+  pending: "yes",
+  yes: "no",
+  no: "pending",
+};
+
 interface Props {
   initialGuests: GuestRow[];
 }
@@ -111,6 +119,24 @@ export function GuestsClient({ initialGuests }: Props) {
     if (!confirm(`Delete "${g.name}"?`)) return;
     setGuests((prev) => prev.filter((x) => x.id !== g.id));
     startTransition(() => { deleteGuest(g.id); });
+  };
+
+  /** Optimistically patch one field and persist via the existing updateGuest
+   *  action, which expects a full FormData payload. */
+  const patchGuest = (g: GuestRow, patch: Partial<GuestRow>) => {
+    const next = { ...g, ...patch };
+    setGuests((prev) => prev.map((x) => (x.id === g.id ? next : x)));
+    const fd = new FormData();
+    fd.set("name", next.name);
+    fd.set("side", next.side);
+    fd.set("category", next.category ?? "");
+    fd.set("plus_one", String(next.plus_one));
+    fd.set("plus_one_name", next.plus_one_name ?? "");
+    fd.set("rsvp", next.rsvp);
+    fd.set("invited", String(next.invited));
+    fd.set("email", next.email ?? "");
+    fd.set("phone", next.phone ?? "");
+    startTransition(() => { updateGuest(g.id, null, fd); });
   };
 
   usePageHeader("Add guest", () => { setEditing(null); setDialogOpen(true); });
@@ -176,36 +202,48 @@ export function GuestsClient({ initialGuests }: Props) {
         )}
       </div>
 
+      {(searchLower || filter !== "Everyone") && (
+        <div className="flex items-center gap-3 px-1 text-[13px] text-[var(--fg3)]">
+          <span>
+            Showing {visibleGuests.length} of {total}
+          </span>
+          <button
+            type="button"
+            onClick={() => { setSearch(""); setFilter("Everyone"); }}
+            className="text-[var(--accent)] hover:opacity-60"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       {view === "party" ? (
         <GuestParty guests={visibleGuests} onEdit={(g) => { setEditing(g); setDialogOpen(true); }} />
       ) : visibleGuests.length === 0 ? (
-        <ListGroup>
-          <ListRow>
-            <span className="text-[15px] text-[var(--fg2)]">No guests match this search.</span>
-          </ListRow>
-        </ListGroup>
+        <div className="rounded-[12px] bg-[var(--card)] px-1 py-14 text-center">
+          <p className="text-[17px] text-[var(--fg2)]">
+            {searchLower ? `No guests matching “${search.trim()}”.` : "No guests here yet."}
+          </p>
+          <button
+            type="button"
+            onClick={() => { setEditing(null); setDialogOpen(true); }}
+            className="mt-3 text-[15px] text-[var(--accent)] hover:opacity-60"
+          >
+            Add guest
+          </button>
+        </div>
       ) : (
         <div className="flex flex-col gap-6">
           {guestGroups.map((group) => (
             <ListGroup key={group.label ?? "all"} label={group.label}>
               {group.guests.map((g) => (
-                <ListRow
+                <GuestListRow
                   key={g.id}
-                  as="button"
-                  interactive
-                  onClick={() => { setEditing(g); setDialogOpen(true); }}
-                >
-                  <GuestInitials guest={g} />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[17px] tracking-[-0.014em]">{g.name}</div>
-                    <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">
-                      {SIDE_LABEL[g.side]}{g.plus_one ? ` · plus ${g.plus_one_name || "one"}` : ""}
-                    </div>
-                  </div>
-                  <span className="ml-auto text-[15px] whitespace-nowrap tracking-[-0.01em] text-[var(--fg2)]">
-                    {RSVP_LABEL[g.rsvp]}
-                  </span>
-                </ListRow>
+                  guest={g}
+                  onEdit={() => { setEditing(g); setDialogOpen(true); }}
+                  onCycleRsvp={() => patchGuest(g, { rsvp: NEXT_RSVP[g.rsvp] })}
+                  onToggleInvited={() => patchGuest(g, { invited: !g.invited })}
+                />
               ))}
             </ListGroup>
           ))}
@@ -248,6 +286,88 @@ function GuestInitials({ guest, size = 32 }: { guest: GuestRow; size?: number })
     >
       {getInitials(guest.name)}
     </span>
+  );
+}
+
+// ============================================================================
+// List row — the name opens the edit dialog, but the two things you most
+// often want to change (RSVP, whether the invite went out) are one tap
+// each, and stored contact details become actual mailto/tel links so you
+// can chase a reply without leaving the page.
+// ============================================================================
+
+function GuestListRow({
+  guest, onEdit, onCycleRsvp, onToggleInvited,
+}: {
+  guest: GuestRow;
+  onEdit: () => void;
+  onCycleRsvp: () => void;
+  onToggleInvited: () => void;
+}) {
+  const secondary = [
+    SIDE_LABEL[guest.side],
+    guest.plus_one ? `plus ${guest.plus_one_name || "one"}` : null,
+    guest.category,
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <ListRow className="group">
+      <button
+        type="button"
+        onClick={onEdit}
+        className="flex min-w-0 flex-1 items-center gap-3.5 text-left transition-opacity hover:opacity-70"
+      >
+        <GuestInitials guest={guest} />
+        <div className="min-w-0">
+          <div className="truncate text-[17px] tracking-[-0.014em]">{guest.name}</div>
+          <div className="mt-0.5 truncate text-[14px] tracking-[-0.008em] text-[var(--fg2)]">{secondary}</div>
+        </div>
+      </button>
+
+      <div className="ml-auto flex flex-none items-center gap-2">
+        {guest.email && (
+          <a
+            href={`mailto:${guest.email}`}
+            title={guest.email}
+            className="hidden text-[13px] text-[var(--accent)] hover:opacity-60 sm:inline"
+          >
+            Email
+          </a>
+        )}
+        {guest.phone && (
+          <a
+            href={`tel:${guest.phone}`}
+            title={guest.phone}
+            className="hidden text-[13px] text-[var(--accent)] hover:opacity-60 sm:inline"
+          >
+            Call
+          </a>
+        )}
+
+        {!guest.invited && (
+          <button
+            type="button"
+            onClick={onToggleInvited}
+            title="Mark the invitation as sent"
+            className="rounded-full px-2 py-0.5 text-[12px] whitespace-nowrap transition-opacity hover:opacity-70"
+            style={{ background: "var(--fill)", color: "var(--fg3)" }}
+          >
+            No invite
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={onCycleRsvp}
+          title={`Tap to mark as ${RSVP_LABEL[NEXT_RSVP[guest.rsvp]]}`}
+          className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[14px] whitespace-nowrap transition-opacity hover:opacity-70"
+          style={{ background: "var(--fill)" }}
+        >
+          <span className="h-[7px] w-[7px] rounded-full" style={{ background: RSVP_DOT[guest.rsvp] }} />
+          <span className="tracking-[-0.01em] text-[var(--fg)]">{RSVP_LABEL[guest.rsvp]}</span>
+        </button>
+      </div>
+    </ListRow>
   );
 }
 
