@@ -58,11 +58,14 @@ interface Props {
 }
 
 type GuestView = "party" | "list";
+type GroupBy = "none" | "rsvp" | "side";
 
 export function GuestsClient({ initialGuests }: Props) {
   const [guests, setGuests] = useState<GuestRow[]>(initialGuests);
   const [filter, setFilter] = useState("Everyone");
-  const [view, setView] = useState<GuestView>("party");
+  const [search, setSearch] = useState("");
+  const [view, setView] = useState<GuestView>("list");
+  const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<GuestRow | null>(null);
   const [, startTransition] = useTransition();
@@ -96,9 +99,13 @@ export function GuestsClient({ initialGuests }: Props) {
   const categories = [...new Set(guests.map((g) => g.category).filter(Boolean))] as string[];
   const filters = ["Everyone", ...categories];
 
+  const searchLower = search.trim().toLowerCase();
   const visibleGuests = (filter === "Everyone" ? guests : guests.filter((g) => g.category === filter))
+    .filter((g) => !searchLower || g.name.toLowerCase().includes(searchLower))
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name));
+
+  const guestGroups = groupGuests(visibleGuests, groupBy);
 
   const handleDelete = (g: GuestRow) => {
     if (!confirm(`Delete "${g.name}"?`)) return;
@@ -126,6 +133,21 @@ export function GuestsClient({ initialGuests }: Props) {
         )}
       </div>
 
+      <div className="flex flex-wrap items-center gap-3">
+        <Input
+          type="search"
+          placeholder="Search guests…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="min-w-[200px] flex-1"
+        />
+        <Segmented
+          options={[{ value: "list", label: "List" }, { value: "party", label: "Party" }]}
+          value={view}
+          onChange={setView}
+        />
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
           {filters.map((f) => {
@@ -145,43 +167,49 @@ export function GuestsClient({ initialGuests }: Props) {
             );
           })}
         </div>
-        <Segmented
-          options={[{ value: "party", label: "Party" }, { value: "list", label: "List" }]}
-          value={view}
-          onChange={setView}
-        />
+        {view === "list" && (
+          <Segmented
+            options={[{ value: "none", label: "A–Z" }, { value: "rsvp", label: "RSVP" }, { value: "side", label: "Side" }]}
+            value={groupBy}
+            onChange={setGroupBy}
+          />
+        )}
       </div>
 
       {view === "party" ? (
         <GuestParty guests={visibleGuests} onEdit={(g) => { setEditing(g); setDialogOpen(true); }} />
-      ) : (
+      ) : visibleGuests.length === 0 ? (
         <ListGroup>
-          {visibleGuests.length === 0 ? (
-            <ListRow>
-              <span className="text-[15px] text-[var(--fg2)]">No guests match this filter.</span>
-            </ListRow>
-          ) : (
-            visibleGuests.map((g) => (
-              <ListRow
-                key={g.id}
-                as="button"
-                interactive
-                onClick={() => { setEditing(g); setDialogOpen(true); }}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="text-[17px] tracking-[-0.014em]">{g.name}</div>
-                  <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">
-                    {SIDE_LABEL[g.side]}{g.plus_one ? ` · plus ${g.plus_one_name || "one"}` : ""}
-                  </div>
-                </div>
-                <div className="ml-auto flex items-center gap-2 whitespace-nowrap">
-                  <span className="h-[7px] w-[7px] rounded-full" style={{ background: RSVP_DOT[g.rsvp] }} />
-                  <span className="text-[15px] tracking-[-0.01em] text-[var(--fg2)]">{RSVP_LABEL[g.rsvp]}</span>
-                </div>
-              </ListRow>
-            ))
-          )}
+          <ListRow>
+            <span className="text-[15px] text-[var(--fg2)]">No guests match this search.</span>
+          </ListRow>
         </ListGroup>
+      ) : (
+        <div className="flex flex-col gap-6">
+          {guestGroups.map((group) => (
+            <ListGroup key={group.label ?? "all"} label={group.label}>
+              {group.guests.map((g) => (
+                <ListRow
+                  key={g.id}
+                  as="button"
+                  interactive
+                  onClick={() => { setEditing(g); setDialogOpen(true); }}
+                >
+                  <GuestInitials guest={g} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[17px] tracking-[-0.014em]">{g.name}</div>
+                    <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">
+                      {SIDE_LABEL[g.side]}{g.plus_one ? ` · plus ${g.plus_one_name || "one"}` : ""}
+                    </div>
+                  </div>
+                  <span className="ml-auto text-[15px] whitespace-nowrap tracking-[-0.01em] text-[var(--fg2)]">
+                    {RSVP_LABEL[g.rsvp]}
+                  </span>
+                </ListRow>
+              ))}
+            </ListGroup>
+          ))}
+        </div>
       )}
 
       <GuestDialog
@@ -194,17 +222,61 @@ export function GuestsClient({ initialGuests }: Props) {
   );
 }
 
-// ============================================================================
-// Party view — a little crowd of avatars per side, standing around and
-// idling. Purely a fun alternate view; the List view stays the practical
-// one for scanning details.
-// ============================================================================
-
 function hashString(s: string): number {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return h;
 }
+
+function getInitials(name: string): string {
+  return name.split(/\s+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join("").toUpperCase() || "?";
+}
+
+/** Small static initials badge with an RSVP-colored ring, used in list rows. */
+function GuestInitials({ guest, size = 32 }: { guest: GuestRow; size?: number }) {
+  return (
+    <span
+      className="flex flex-none items-center justify-center rounded-full font-semibold"
+      style={{
+        width: size,
+        height: size,
+        fontSize: size * 0.36,
+        background: "var(--fill)",
+        color: "var(--fg)",
+        boxShadow: `inset 0 0 0 1.5px ${RSVP_DOT[guest.rsvp]}`,
+      }}
+    >
+      {getInitials(guest.name)}
+    </span>
+  );
+}
+
+// ============================================================================
+// List grouping — reorganizes the (already filtered/searched) list into
+// sectioned ListGroups instead of one flat alphabetical run.
+// ============================================================================
+
+function groupGuests(guests: GuestRow[], groupBy: "none" | "rsvp" | "side"): { label?: string; guests: GuestRow[] }[] {
+  if (groupBy === "none") return [{ guests }];
+
+  if (groupBy === "rsvp") {
+    const order: GuestRsvp[] = ["yes", "pending", "no"];
+    return order
+      .map((rsvp) => ({ label: `${RSVP_LABEL[rsvp]} (${guests.filter((g) => g.rsvp === rsvp).length})`, guests: guests.filter((g) => g.rsvp === rsvp) }))
+      .filter((g) => g.guests.length > 0);
+  }
+
+  const order: GuestSide[] = ["groom", "bride", "both"];
+  return order
+    .map((side) => ({ label: `${SIDE_LABEL[side]} (${guests.filter((g) => g.side === side).length})`, guests: guests.filter((g) => g.side === side) }))
+    .filter((g) => g.guests.length > 0);
+}
+
+// ============================================================================
+// Party view — a little crowd of avatars per side, standing around and
+// idling. Purely a fun alternate view; the List view stays the practical
+// one for scanning details.
+// ============================================================================
 
 function GuestParty({ guests, onEdit }: { guests: GuestRow[]; onEdit: (g: GuestRow) => void }) {
   const groomGuests = guests.filter((g) => g.side === "groom");
@@ -255,7 +327,6 @@ function GuestBox({
 }
 
 function GuestAvatar({ guest, onClick }: { guest: GuestRow; onClick: () => void }) {
-  const initials = guest.name.split(/\s+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
   const seed = hashString(guest.id);
   const size = 44 + (seed % 12); // 44-55px, so the crowd isn't a rigid grid
   const bobDelay = ((seed >> 4) % 30) / 10; // 0-2.9s
@@ -278,7 +349,7 @@ function GuestAvatar({ guest, onClick }: { guest: GuestRow; onClick: () => void 
         "--bob-duration": `${bobDuration}s`,
       } as React.CSSProperties}
     >
-      {initials || "?"}
+      {getInitials(guest.name)}
       {guest.plus_one && (
         <span
           className="absolute -right-0.5 -bottom-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold"
