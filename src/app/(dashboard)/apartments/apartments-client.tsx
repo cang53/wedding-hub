@@ -7,7 +7,6 @@ import { formatMoney } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -159,7 +158,14 @@ function SelectField({
   options: { value: string; label: string }[];
 }) {
   const [value, setValue] = useState(defaultValue);
-  useEffect(() => { setValue(defaultValue); }, [defaultValue]);
+  // Re-sync when the dialog is reused for a different row. Adjusting state
+  // during render is cheaper than an effect: React re-runs this component
+  // before committing, so the stale value never reaches the DOM.
+  const [syncedDefault, setSyncedDefault] = useState(defaultValue);
+  if (syncedDefault !== defaultValue) {
+    setSyncedDefault(defaultValue);
+    setValue(defaultValue);
+  }
   return (
     <>
       <input type="hidden" name={name} value={value} />

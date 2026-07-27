@@ -286,7 +286,14 @@ function SelectField({
   options: { value: string; label: string }[];
 }) {
   const [value, setValue] = useState(defaultValue);
-  useEffect(() => { setValue(defaultValue); }, [defaultValue]);
+  // Re-sync when the dialog is reused for a different row. Adjusting state
+  // during render is cheaper than an effect: React re-runs this component
+  // before committing, so the stale value never reaches the DOM.
+  const [syncedDefault, setSyncedDefault] = useState(defaultValue);
+  if (syncedDefault !== defaultValue) {
+    setSyncedDefault(defaultValue);
+    setValue(defaultValue);
+  }
   return (
     <>
       <input type="hidden" name={name} value={value} />
@@ -311,10 +318,7 @@ function GuestDialog({
 }) {
   const action = editing ? updateGuest.bind(null, editing.id) : createGuest;
   const [state, formAction, pending] = useActionState<{ error?: string; ok?: true } | null, FormData>(action, null);
-  const [plusOne, setPlusOne] = useState(editing?.plus_one ?? false);
-
   useEffect(() => { if (state?.ok) onOpenChange(false); }, [state, onOpenChange]);
-  useEffect(() => { setPlusOne(editing?.plus_one ?? false); }, [editing]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { WEDDING_DATE } from "@/lib/config";
+import { useWeddingRole, type WeddingRole } from "@/lib/use-wedding-role";
 import { daysUntil } from "@/lib/utils";
 import { createWeddingDayEvent, deleteWeddingDayEvent, updateWeddingDayEvent } from "./actions";
 
@@ -178,13 +179,16 @@ export function WeddingDayClient({ initialItems }: Props) {
   const [, startTransition] = useTransition();
   const [now, setNow] = useState<Date | null>(null);
 
-  // Read view mode from localStorage on mount (sync with role choice)
-  useEffect(() => {
-    const role = localStorage.getItem("wedding-role") as ViewMode | null;
-    if (role === "bride" || role === "groom") {
-      setViewMode(role);
-    }
-  }, []);
+  // Default the view to whichever role was picked on the landing page. The
+  // role arrives after hydration (it lives in localStorage), so adjust state
+  // during render on the pass where it first appears rather than in an
+  // effect. Later clicks on the view tabs override it freely.
+  const role = useWeddingRole();
+  const [appliedRole, setAppliedRole] = useState<WeddingRole | null>(null);
+  if (role !== appliedRole) {
+    setAppliedRole(role);
+    if (role) setViewMode(role);
+  }
 
   // Update "now" every minute for live indicator
   useEffect(() => {
@@ -1047,7 +1051,7 @@ function WeddingDayDialog({
 
           {/* Assignee selector */}
           <div className="flex flex-col gap-2">
-            <Label>Who's involved?</Label>
+            <Label>Who&rsquo;s involved?</Label>
             <input type="hidden" name="assignee" value={assignee} />
             <div className="grid grid-cols-3 gap-2">
               {(["bride", "both", "groom"] as WeddingDayAssignee[]).map((opt) => {

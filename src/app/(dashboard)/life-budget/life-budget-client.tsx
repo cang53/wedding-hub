@@ -158,7 +158,12 @@ function MonthSelect({ name, defaultValue, placeholder = "Select month…", requ
   // Internal value uses NO_MONTH as the sentinel for "no selection";
   // the hidden input that the form submits stores "" instead.
   const [value, setValue] = useState<string>(defaultValue ? defaultValue : NO_MONTH);
-  useEffect(() => { setValue(defaultValue ? defaultValue : NO_MONTH); }, [defaultValue]);
+  // Re-sync when the dialog is reused for a different row — see SelectField.
+  const [syncedDefault, setSyncedDefault] = useState(defaultValue);
+  if (syncedDefault !== defaultValue) {
+    setSyncedDefault(defaultValue);
+    setValue(defaultValue ? defaultValue : NO_MONTH);
+  }
 
   const submittedValue = value === NO_MONTH ? "" : value;
 
@@ -265,7 +270,11 @@ export function LifeBudgetClient({
     const months = monthsList(settings.start_month, settings.horizon_months);
     let cumulative = startingCash;
 
-    const series = months.map((month) => {
+    // Written as a loop rather than .map() because each row's `cumulative`
+    // carries over from the previous one — a running total mutated inside a
+    // map callback reads as a side effect during render.
+    const series = [];
+    for (const month of months) {
       const monthIncome = income
         .filter((i) => isActiveInMonth(i.start_month, i.end_month, month))
         .reduce((a, i) => a + Number(i.amount), 0);
@@ -282,8 +291,8 @@ export function LifeBudgetClient({
       const net = monthIncome - totalOut;
       cumulative += net;
 
-      return { month, income: monthIncome, fixed: monthFixed, purchases: monthPurchases, net, cumulative };
-    });
+      series.push({ month, income: monthIncome, fixed: monthFixed, purchases: monthPurchases, net, cumulative });
+    }
 
     return series;
   }, [income, expenses, purchases, settings, startingCash]);
@@ -1452,7 +1461,10 @@ function PersonView({
   const personProjection = useMemo((): PersonPoint[] => {
     const months = monthsList(settings.start_month, settings.horizon_months);
     let cumulative = personStartingCash;
-    return months.map((month) => {
+    // Loop rather than .map() — `cumulative` is a running total that carries
+    // between rows, which reads as a side effect inside a map callback.
+    const series: PersonPoint[] = [];
+    for (const month of months) {
       const myInc = income
         .filter((i) => i.person === person && isActiveInMonth(i.start_month, i.end_month, month))
         .reduce((a, i) => a + Number(i.amount), 0);
@@ -1472,8 +1484,9 @@ function PersonView({
       const totalOut = myExp + shExp + myP;
       const net = totalIn - totalOut;
       cumulative += net;
-      return { month, totalIn, totalOut, net, cumulative };
-    });
+      series.push({ month, totalIn, totalOut, net, cumulative });
+    }
+    return series;
   }, [income, expenses, purchases, settings, person, personStartingCash]);
 
   const savingsRate = snap.totalIn > 0 ? (snap.net / snap.totalIn) * 100 : 0;
@@ -2110,7 +2123,14 @@ function SelectField({
   options: { value: string; label: string }[];
 }) {
   const [value, setValue] = useState(defaultValue);
-  useEffect(() => { setValue(defaultValue); }, [defaultValue]);
+  // Re-sync when the dialog is reused for a different row. Adjusting state
+  // during render is cheaper than an effect: React re-runs this component
+  // before committing, so the stale value never reaches the DOM.
+  const [syncedDefault, setSyncedDefault] = useState(defaultValue);
+  if (syncedDefault !== defaultValue) {
+    setSyncedDefault(defaultValue);
+    setValue(defaultValue);
+  }
   return (
     <>
       <input type="hidden" name={name} value={value} />
@@ -2326,7 +2346,10 @@ function ExpenseDialog({
     toBreakdownItems(editing?.breakdown_items ?? [])
   );
 
-  useEffect(() => {
+  // Reset every field when the dialog is reused for a different expense.
+  const [syncedEditing, setSyncedEditing] = useState(editing);
+  if (syncedEditing !== editing) {
+    setSyncedEditing(editing);
     setPayer(editing?.payer ?? "both");
     setExpenseType(editing?.expense_type ?? "fixed");
     setFixedAmount(Number(editing?.amount ?? 0));
@@ -2334,7 +2357,7 @@ function ExpenseDialog({
     setCreditMonths(editing?.credit_months ?? 12);
     setCreditRate(editing?.credit_interest_rate ?? 0);
     setBreakdownItems(toBreakdownItems(editing?.breakdown_items ?? []));
-  }, [editing]);
+  }
 
   useEffect(() => {
     if (state?.ok && state?.data) { onSaved(state.data); onOpenChange(false); }
@@ -3672,6 +3695,35 @@ function TransferDialog({
 // ExpandedSavingsDialog — full list with search + filters
 // ============================================================================
 
+type SavingsSortKey = "date" | "amount";
+
+/**
+ * Sortable column header for the expanded savings table. Declared at module
+ * scope so its identity is stable — a component defined inside another
+ * component is a brand-new type on every render, which throws away the
+ * subtree's DOM and state each time the parent re-renders.
+ */
+function SortTh({
+  col,
+  label,
+  sortKey,
+  sortDir,
+  onToggle,
+}: {
+  col: SavingsSortKey;
+  label: string;
+  sortKey: SavingsSortKey;
+  sortDir: "asc" | "desc";
+  onToggle: (col: SavingsSortKey) => void;
+}) {
+  const active = sortKey === col;
+  return (
+    <th className="cursor-pointer select-none hover:text-ink transition-colors" onClick={() => onToggle(col)}>
+      {label} {active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
+    </th>
+  );
+}
+
 function ExpandedSavingsDialog({
   open, onOpenChange, savings, onEdit, onDelete, onAdd,
 }: {
@@ -3684,10 +3736,10 @@ function ExpandedSavingsDialog({
 }) {
   const [search, setSearch] = useState("");
   const [contributorFilter, setContributorFilter] = useState("all");
-  const [sortKey, setSortKey] = useState<"date" | "amount">("date");
+  const [sortKey, setSortKey] = useState<SavingsSortKey>("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  function toggleSort(key: "date" | "amount") {
+  function toggleSort(key: SavingsSortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(key); setSortDir("desc"); }
   }
@@ -3707,15 +3759,6 @@ function ExpandedSavingsDialog({
   }, [savings, search, contributorFilter, sortKey, sortDir]);
 
   const fs = "h-8 text-[12px] rounded border border-line bg-paper px-2 text-ink focus:outline-none";
-
-  function SortTh({ col, label }: { col: "date" | "amount"; label: string }) {
-    const active = sortKey === col;
-    return (
-      <th className="cursor-pointer select-none hover:text-ink transition-colors" onClick={() => toggleSort(col)}>
-        {label} {active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
-      </th>
-    );
-  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -3740,8 +3783,8 @@ function ExpandedSavingsDialog({
               <tr>
                 <th>Source</th>
                 <th>Contributor</th>
-                <SortTh col="date" label="Date" />
-                <SortTh col="amount" label="Amount" />
+                <SortTh col="date" label="Date" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+                <SortTh col="amount" label="Amount" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
                 <th>Notes</th>
                 <th></th>
               </tr>
@@ -3792,6 +3835,48 @@ type TLNode = { day: number; events: (CalEv & { day: number })[]; balanceBefore:
 // CashTimeline — horizontal flow of events + running balance
 // ============================================================================
 
+const lineCol = (bal: number) => (bal >= 0 ? "#7c8a6b" : "#7a1f2b");
+const txtCol = (bal: number) => (bal >= 0 ? "text-sage" : "text-burgundy");
+
+/**
+ * Segment of the cash timeline between two pinned days. Module scope keeps
+ * its component identity stable across CashTimeline re-renders.
+ */
+function Connector({ fromBal, days }: { fromBal: number; days: number }) {
+  const c = lineCol(fromBal);
+  return (
+    <div
+      className="flex flex-col items-center justify-center relative min-w-[28px]"
+      style={{ flexGrow: Math.max(1, days), flexBasis: 0 }}
+    >
+      <div className="text-[9px] font-mono text-ink-soft/40 mb-1.5 h-3 leading-none text-center">
+        {days > 1 ? `${days}d` : ""}
+      </div>
+      <div className="w-full h-[2px]" style={{ background: `linear-gradient(to right, ${c}80, ${c})` }} />
+      <div className={`mt-1.5 text-[9px] font-mono ${txtCol(fromBal)}`}>{formatMoneyShort(fromBal)}</div>
+    </div>
+  );
+}
+
+/** Balance bubble at either end of the cash timeline. */
+function Cap({ label, amount, delta }: { label: string; amount: number; delta?: number }) {
+  return (
+    <div className="flex flex-col items-center gap-1 shrink-0">
+      <div className="text-[9px] uppercase tracking-[0.2em] text-ink-soft font-medium">{label}</div>
+      <div className={`w-[52px] h-[52px] rounded-full border-2 flex items-center justify-center ${amount >= 0 ? "border-sage bg-sage/10" : "border-burgundy bg-burgundy/10"}`}>
+        <div className={`text-[9px] font-mono font-bold text-center leading-tight ${txtCol(amount)}`}>
+          {formatMoneyShort(amount)}
+        </div>
+      </div>
+      {delta !== undefined && (
+        <div className={`text-[9px] font-medium ${delta >= 0 ? "text-sage" : "text-burgundy"}`}>
+          {delta >= 0 ? "▲" : "▼"} {formatMoneyShort(Math.abs(delta))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CashTimeline({
   nodes, unscheduledEvents, cashAtMonthStart, daysInMonth, currentMonth, selectedDay, onSelectDay,
 }: {
@@ -3807,41 +3892,6 @@ function CashTimeline({
   const unschedNet = unscheduledEvents.reduce((a, e) => a + (e.type === "income" ? e.amount : -e.amount), 0);
   const finalEnd = scheduledEnd + unschedNet;
   const [cY, cM] = currentMonth.split("-").map(Number);
-
-  const lineCol = (bal: number) => bal >= 0 ? "#7c8a6b" : "#7a1f2b";
-  const txtCol = (bal: number) => bal >= 0 ? "text-sage" : "text-burgundy";
-
-  const Connector = ({ fromBal, days }: { fromBal: number; days: number }) => {
-    const c = lineCol(fromBal);
-    return (
-      <div
-        className="flex flex-col items-center justify-center relative min-w-[28px]"
-        style={{ flexGrow: Math.max(1, days), flexBasis: 0 }}
-      >
-        <div className="text-[9px] font-mono text-ink-soft/40 mb-1.5 h-3 leading-none text-center">
-          {days > 1 ? `${days}d` : ""}
-        </div>
-        <div className="w-full h-[2px]" style={{ background: `linear-gradient(to right, ${c}80, ${c})` }} />
-        <div className={`mt-1.5 text-[9px] font-mono ${txtCol(fromBal)}`}>{formatMoneyShort(fromBal)}</div>
-      </div>
-    );
-  };
-
-  const Cap = ({ label, amount, delta }: { label: string; amount: number; delta?: number }) => (
-    <div className="flex flex-col items-center gap-1 shrink-0">
-      <div className="text-[9px] uppercase tracking-[0.2em] text-ink-soft font-medium">{label}</div>
-      <div className={`w-[52px] h-[52px] rounded-full border-2 flex items-center justify-center ${amount >= 0 ? "border-sage bg-sage/10" : "border-burgundy bg-burgundy/10"}`}>
-        <div className={`text-[9px] font-mono font-bold text-center leading-tight ${txtCol(amount)}`}>
-          {formatMoneyShort(amount)}
-        </div>
-      </div>
-      {delta !== undefined && (
-        <div className={`text-[9px] font-medium ${delta >= 0 ? "text-sage" : "text-burgundy"}`}>
-          {delta >= 0 ? "▲" : "▼"} {formatMoneyShort(Math.abs(delta))}
-        </div>
-      )}
-    </div>
-  );
 
   return (
     <div className="mb-5">
@@ -4080,7 +4130,9 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
   }, [scheduledEvents, cashAtMonthStart]);
 
   const [y, m] = currentMonth.split("-").map(Number);
-  const daysInMonth = new Date(y, m, 0).getDate();
+  // Memoised so the dailyBalances memo below has a dependency the compiler
+  // can trace, rather than a value recomputed inline on every render.
+  const daysInMonth = useMemo(() => new Date(y, m, 0).getDate(), [y, m]);
 
   const dailyBalances = useMemo(() => {
     const arr: number[] = Array(daysInMonth + 1).fill(0);

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition, useActionState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { useNow } from "@/lib/use-now";
 import type { AgendaRow } from "@/types/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,8 +86,9 @@ export function AgendaClient({ initialEvents }: Props) {
 
   // ---- Sort: upcoming ascending, then past descending -----------------------
 
+  const now = useNow();
+
   const sorted = useMemo(() => {
-    const now = Date.now();
     const upcoming = events
       .filter((e) => new Date(e.date).getTime() >= now - 24 * 60 * 60 * 1000)
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -94,7 +96,7 @@ export function AgendaClient({ initialEvents }: Props) {
       .filter((e) => new Date(e.date).getTime() < now - 24 * 60 * 60 * 1000)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return [...upcoming, ...past];
-  }, [events]);
+  }, [events, now]);
 
   // ---- Actions --------------------------------------------------------------
 
@@ -175,7 +177,6 @@ function AgendaItem({
   onDelete: () => void;
 }) {
   const d = new Date(event.date);
-  const localParts = toLocalDateTimeParts(event.date);
   const allDayParts = getAllDayDateParts(event.date);
   const day = event.all_day ? allDayParts.day : d.getDate();
   const month = event.all_day
@@ -186,7 +187,8 @@ function AgendaItem({
     ? null
     : d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
-  const isPast = d.getTime() < Date.now() - 24 * 60 * 60 * 1000;
+  const now = useNow();
+  const isPast = d.getTime() < now - 24 * 60 * 60 * 1000;
 
   return (
     <li

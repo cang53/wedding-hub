@@ -1,19 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { ROLE_STORAGE_KEY, useWeddingRole } from "@/lib/use-wedding-role";
 
 export function RoleSelector() {
   const router = useRouter();
-  const [role, setRole] = useState<"bride" | "groom" | null>(null);
-
-  useEffect(() => {
-    const savedRole = localStorage.getItem("wedding-role") as "bride" | "groom" | null;
-    setRole(savedRole);
-  }, []);
+  const role = useWeddingRole();
 
   const handleChangeRole = () => {
-    localStorage.removeItem("wedding-role");
+    localStorage.removeItem(ROLE_STORAGE_KEY);
     router.push("/");
   };
 

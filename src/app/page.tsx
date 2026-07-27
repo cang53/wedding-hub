@@ -53,7 +53,7 @@ export default function LandingPage() {
               The Bride
             </h2>
             <p className="text-ink-soft text-[14px]">
-              Let's plan your big day
+              Let&rsquo;s plan your big day
             </p>
             {selectedRole === "bride" && (
               <div className="mt-4 text-burgundy text-[14px] font-medium">
@@ -82,7 +82,7 @@ export default function LandingPage() {
               The Groom
             </h2>
             <p className="text-ink-soft text-[14px]">
-              Let's plan our future together
+              Let&rsquo;s plan our future together
             </p>
             {selectedRole === "groom" && (
               <div className="mt-4 text-sage text-[14px] font-medium">

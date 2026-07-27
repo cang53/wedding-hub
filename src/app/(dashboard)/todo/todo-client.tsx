@@ -387,11 +387,15 @@ function SelectFormField({
 }) {
   const [value, setValue] = useState(defaultValue);
 
-  // Keep the controlled value in sync when `defaultValue` (prop) changes
-  // e.g. when opening the dialog to edit a different todo.
-  useEffect(() => {
+  // Keep the controlled value in sync when `defaultValue` (prop) changes,
+  // e.g. when opening the dialog to edit a different todo. Adjusting state
+  // during render is cheaper than an effect: React re-runs this component
+  // before committing, so the stale value never reaches the DOM.
+  const [syncedDefault, setSyncedDefault] = useState(defaultValue);
+  if (syncedDefault !== defaultValue) {
+    setSyncedDefault(defaultValue);
     setValue(defaultValue);
-  }, [defaultValue]);
+  }
   return (
     <>
       <input type="hidden" name={name} value={value} />
