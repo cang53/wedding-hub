@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ListGroup, ListRow } from "@/components/ui/list-group";
+import { Segmented } from "@/components/ui/segmented";
 import { usePageHeader } from "@/components/shell/header-context";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -56,9 +57,12 @@ interface Props {
   initialGuests: GuestRow[];
 }
 
+type GuestView = "party" | "list";
+
 export function GuestsClient({ initialGuests }: Props) {
   const [guests, setGuests] = useState<GuestRow[]>(initialGuests);
   const [filter, setFilter] = useState("Everyone");
+  const [view, setView] = useState<GuestView>("party");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<GuestRow | null>(null);
   const [, startTransition] = useTransition();
@@ -122,52 +126,63 @@ export function GuestsClient({ initialGuests }: Props) {
         )}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {filters.map((f) => {
-          const active = filter === f;
-          return (
-            <button
-              key={f}
-              type="button"
-              onClick={() => setFilter(f)}
-              className={cn(
-                "h-[30px] whitespace-nowrap rounded-full px-[13px] text-[14px] tracking-[-0.01em] transition-colors",
-                active ? "bg-[var(--fg)] font-[560] text-[var(--bg)]" : "bg-[var(--fill)] font-[440] text-[var(--fg)]"
-              )}
-            >
-              {f}
-            </button>
-          );
-        })}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {filters.map((f) => {
+            const active = filter === f;
+            return (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFilter(f)}
+                className={cn(
+                  "h-[30px] whitespace-nowrap rounded-full px-[13px] text-[14px] tracking-[-0.01em] transition-colors",
+                  active ? "bg-[var(--fg)] font-[560] text-[var(--bg)]" : "bg-[var(--fill)] font-[440] text-[var(--fg)]"
+                )}
+              >
+                {f}
+              </button>
+            );
+          })}
+        </div>
+        <Segmented
+          options={[{ value: "party", label: "Party" }, { value: "list", label: "List" }]}
+          value={view}
+          onChange={setView}
+        />
       </div>
 
-      <ListGroup>
-        {visibleGuests.length === 0 ? (
-          <ListRow>
-            <span className="text-[15px] text-[var(--fg2)]">No guests match this filter.</span>
-          </ListRow>
-        ) : (
-          visibleGuests.map((g) => (
-            <ListRow
-              key={g.id}
-              as="button"
-              interactive
-              onClick={() => { setEditing(g); setDialogOpen(true); }}
-            >
-              <div className="min-w-0 flex-1">
-                <div className="text-[17px] tracking-[-0.014em]">{g.name}</div>
-                <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">
-                  {SIDE_LABEL[g.side]}{g.plus_one ? ` · plus ${g.plus_one_name || "one"}` : ""}
-                </div>
-              </div>
-              <div className="ml-auto flex items-center gap-2 whitespace-nowrap">
-                <span className="h-[7px] w-[7px] rounded-full" style={{ background: RSVP_DOT[g.rsvp] }} />
-                <span className="text-[15px] tracking-[-0.01em] text-[var(--fg2)]">{RSVP_LABEL[g.rsvp]}</span>
-              </div>
+      {view === "party" ? (
+        <GuestParty guests={visibleGuests} onEdit={(g) => { setEditing(g); setDialogOpen(true); }} />
+      ) : (
+        <ListGroup>
+          {visibleGuests.length === 0 ? (
+            <ListRow>
+              <span className="text-[15px] text-[var(--fg2)]">No guests match this filter.</span>
             </ListRow>
-          ))
-        )}
-      </ListGroup>
+          ) : (
+            visibleGuests.map((g) => (
+              <ListRow
+                key={g.id}
+                as="button"
+                interactive
+                onClick={() => { setEditing(g); setDialogOpen(true); }}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-[17px] tracking-[-0.014em]">{g.name}</div>
+                  <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">
+                    {SIDE_LABEL[g.side]}{g.plus_one ? ` · plus ${g.plus_one_name || "one"}` : ""}
+                  </div>
+                </div>
+                <div className="ml-auto flex items-center gap-2 whitespace-nowrap">
+                  <span className="h-[7px] w-[7px] rounded-full" style={{ background: RSVP_DOT[g.rsvp] }} />
+                  <span className="text-[15px] tracking-[-0.01em] text-[var(--fg2)]">{RSVP_LABEL[g.rsvp]}</span>
+                </div>
+              </ListRow>
+            ))
+          )}
+        </ListGroup>
+      )}
 
       <GuestDialog
         open={dialogOpen}
@@ -176,6 +191,103 @@ export function GuestsClient({ initialGuests }: Props) {
         onDelete={handleDelete}
       />
     </section>
+  );
+}
+
+// ============================================================================
+// Party view — a little crowd of avatars per side, standing around and
+// idling. Purely a fun alternate view; the List view stays the practical
+// one for scanning details.
+// ============================================================================
+
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+function GuestParty({ guests, onEdit }: { guests: GuestRow[]; onEdit: (g: GuestRow) => void }) {
+  const groomGuests = guests.filter((g) => g.side === "groom");
+  const brideGuests = guests.filter((g) => g.side === "bride");
+  const bothGuests = guests.filter((g) => g.side === "both");
+
+  if (guests.length === 0) {
+    return (
+      <div className="rounded-[16px] bg-[var(--card)] px-1 py-16 text-center">
+        <p className="text-[15px] text-[var(--fg2)]">No guests match this filter.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap gap-4">
+        <GuestBox title="Celal's side" guests={groomGuests} onEdit={onEdit} />
+        <GuestBox title="Selver's side" guests={brideGuests} onEdit={onEdit} />
+      </div>
+      {bothGuests.length > 0 && <GuestBox title="Together" guests={bothGuests} onEdit={onEdit} />}
+    </div>
+  );
+}
+
+function GuestBox({
+  title, guests, onEdit,
+}: {
+  title: string;
+  guests: GuestRow[];
+  onEdit: (g: GuestRow) => void;
+}) {
+  return (
+    <div className="min-w-[240px] flex-1 rounded-[16px] bg-[var(--card)] p-4">
+      <div className="mb-3 flex items-center justify-between px-1">
+        <span className="text-[13px] tracking-[-0.004em] text-[var(--fg2)]">{title}</span>
+        <span className="text-[13px] tabular-nums text-[var(--fg3)]">{guests.length}</span>
+      </div>
+      {guests.length === 0 ? (
+        <div className="py-6 text-center text-[13px] text-[var(--fg3)]">No one here yet.</div>
+      ) : (
+        <div className="flex flex-wrap gap-3 px-1 pb-1">
+          {guests.map((g) => <GuestAvatar key={g.id} guest={g} onClick={() => onEdit(g)} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GuestAvatar({ guest, onClick }: { guest: GuestRow; onClick: () => void }) {
+  const initials = guest.name.split(/\s+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+  const seed = hashString(guest.id);
+  const size = 44 + (seed % 12); // 44-55px, so the crowd isn't a rigid grid
+  const bobDelay = ((seed >> 4) % 30) / 10; // 0-2.9s
+  const bobDuration = 2.6 + ((seed >> 8) % 10) / 10; // 2.6-3.5s
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`${guest.name} · ${RSVP_LABEL[guest.rsvp]}${guest.plus_one ? ` · plus ${guest.plus_one_name || "one"}` : ""}`}
+      className="guest-avatar relative flex items-center justify-center rounded-full font-semibold transition-transform hover:z-10 hover:scale-110"
+      style={{
+        width: size,
+        height: size,
+        fontSize: size * 0.32,
+        background: "var(--fill)",
+        color: "var(--fg)",
+        boxShadow: `inset 0 0 0 2px ${RSVP_DOT[guest.rsvp]}`,
+        "--bob-delay": `${bobDelay}s`,
+        "--bob-duration": `${bobDuration}s`,
+      } as React.CSSProperties}
+    >
+      {initials || "?"}
+      {guest.plus_one && (
+        <span
+          className="absolute -right-0.5 -bottom-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold"
+          style={{ background: "var(--card)", color: "var(--fg2)", boxShadow: "0 0 0 2px var(--card)" }}
+        >
+          +1
+        </span>
+      )}
+    </button>
   );
 }
 

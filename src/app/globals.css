@@ -327,6 +327,24 @@ body > :not([data-radix-portal]) {
   .list-row.is-interactive:hover > .list-row-inner {
     opacity: 0.72;
   }
+
+  /* Guest party avatars — a little idle life, like characters standing
+     around rather than a static grid. Each avatar sets its own
+     --bob-duration/--bob-delay so a crowd doesn't move in lockstep. */
+  .guest-avatar {
+    animation: guest-bob var(--bob-duration, 3s) ease-in-out var(--bob-delay, 0s) infinite;
+  }
+}
+
+@keyframes guest-bob {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-4px) rotate(-3deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guest-avatar {
+    animation: none;
+  }
 }
 
 /* Empty state ornament — large italic gold mark */
