@@ -31,6 +31,15 @@ export function formatDate(iso: string | null | undefined): string {
   });
 }
 
+/** Compact date with no year, for tight nowrap rows: "12 Aug". */
+export function formatDateShort(iso: string | null | undefined): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  });
+}
+
 /** Long date: "Saturday, 12 September 2026". */
 export function formatDateLong(iso: string | null | undefined): string {
   if (!iso) return "";

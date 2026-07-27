@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ListGroup, ListRow } from "@/components/ui/list-group";
+import { usePageHeader } from "@/components/shell/header-context";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -101,19 +102,10 @@ export function GuestsClient({ initialGuests }: Props) {
     startTransition(() => { deleteGuest(g.id); });
   };
 
+  usePageHeader("Add guest", () => { setEditing(null); setDialogOpen(true); });
+
   return (
     <section className="font-apple flex flex-col gap-6 text-[var(--fg)]">
-      <div className="flex items-start justify-between gap-4 px-1">
-        <h1 className="text-[clamp(26px,3.4vw,34px)] font-bold leading-tight tracking-[-0.026em]">Guests</h1>
-        <button
-          type="button"
-          onClick={() => { setEditing(null); setDialogOpen(true); }}
-          className="whitespace-nowrap border-none bg-transparent p-0 text-[16px] text-[var(--accent)] transition-opacity hover:opacity-60"
-        >
-          Add guest
-        </button>
-      </div>
-
       <div className="px-1 py-0.5">
         <div className="text-[clamp(38px,6vw,54px)] font-bold leading-none tracking-[-0.04em] tabular-nums">
           {yesCount} of {total + plusOnes} coming

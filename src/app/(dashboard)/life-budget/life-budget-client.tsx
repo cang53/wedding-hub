@@ -34,6 +34,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ListGroup, ListRow } from "@/components/ui/list-group";
+import { Segmented } from "@/components/ui/segmented";
+import { usePageHeader } from "@/components/shell/header-context";
 import {
   createIncome, updateIncome, deleteIncome,
   createExpense, updateExpense, deleteExpense,
@@ -100,12 +103,6 @@ function monthLabel(m: string): string {
   return d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
 }
 
-/** Short label for chart axes. "2026-09" -> "Sep '26". */
-function monthShort(m: string): string {
-  const d = monthToDate(m);
-  return d.toLocaleDateString("en-GB", { month: "short" }) + " '" + String(d.getFullYear()).slice(-2);
-}
-
 function monthsList(start: string, count: number): string[] {
   const out: string[] = [];
   const d = monthToDate(start);
@@ -130,6 +127,49 @@ function personShare(payer: ExpensePayer, groomPct: number | null, side: "groom"
     return side === "groom" ? g : 1 - g;
   }
   return 0;
+}
+
+/** Same projection math as the household one, scoped to one person's share of joint items. */
+function personProjectionFor(
+  person: "groom" | "bride",
+  income: LifeIncomeRow[],
+  expenses: LifeExpenseRow[],
+  purchases: LifePurchaseRow[],
+  settings: LifeSettingsRow,
+  personStartingCash: number
+): PersonPoint[] {
+  const months = monthsList(settings.start_month, settings.horizon_months);
+  let cumulative = personStartingCash;
+  return months.map((month) => {
+    const myInc = income
+      .filter((i) => i.person === person && isActiveInMonth(i.start_month, i.end_month, month))
+      .reduce((a, i) => a + Number(i.amount), 0);
+    const comInc = income
+      .filter((i) => i.person === "both" && isActiveInMonth(i.start_month, i.end_month, month))
+      .reduce((a, i) => a + Number(i.amount) * 0.5, 0);
+    const myExp = expenses
+      .filter((e) => e.payer === person && isActiveInMonth(e.start_month, e.end_month, month))
+      .reduce((a, e) => a + Number(e.amount), 0);
+    const shExp = expenses
+      .filter((e) => e.payer === "both" && isActiveInMonth(e.start_month, e.end_month, month))
+      .reduce((a, e) => a + Number(e.amount) * personShare(e.payer, e.payer_groom_pct, person), 0);
+    const myP = purchases
+      .filter((p) => p.scheduled && p.target_month === month)
+      .reduce((a, p) => a + Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)) * personShare(p.payer, p.payer_groom_pct, person), 0);
+    const totalIn = myInc + comInc;
+    const totalOut = myExp + shExp + myP;
+    const net = totalIn - totalOut;
+    cumulative += net;
+    return { month, totalIn, totalOut, net, cumulative };
+  });
+}
+
+/** Did this month have a scheduled, non-external purchase relevant to `person` (or anyone, if omitted)? */
+function monthHasPurchase(purchases: LifePurchaseRow[], month: string, person?: "groom" | "bride"): boolean {
+  return purchases.some((p) => {
+    if (!p.scheduled || p.target_month !== month || isExternalPayer(p.payer)) return false;
+    return person ? personShare(p.payer, p.payer_groom_pct, person) > 0 : true;
+  });
 }
 
 /** Pre-built list of YYYY-MM strings starting from the current month, spanning 10 years forward. */
@@ -288,45 +328,6 @@ export function LifeBudgetClient({
     return series;
   }, [income, expenses, purchases, settings, startingCash]);
 
-  // ---- KPIs ---------------------------------------------------------------
-  const kpis = useMemo(() => {
-    const firstMonth = settings.start_month;
-    const monthlyIncome = income
-      .filter((i) => isActiveInMonth(i.start_month, i.end_month, firstMonth))
-      .reduce((a, i) => a + Number(i.amount), 0);
-    const monthlyFixed = expenses
-      .filter((e) => isActiveInMonth(e.start_month, e.end_month, firstMonth))
-      .reduce((a, e) => a + (isExternalPayer(e.payer) ? 0 : Number(e.amount)), 0);
-    const monthlyNet = monthlyIncome - monthlyFixed;
-
-    // Runway: starting cash divided by monthly burn (when income < expenses).
-    const burn = monthlyFixed - monthlyIncome;
-    const runwayMonths = burn > 0 ? Math.floor(startingCash / burn) : Infinity;
-
-    // Find first month cumulative goes negative (burn-out).
-    const burnOutIdx = projection.findIndex((p) => p.cumulative < 0);
-    const burnOutMonth = burnOutIdx >= 0 ? projection[burnOutIdx].month : null;
-
-    // Break-even: first month after a dip where cumulative climbs back ≥ 0.
-    let breakEvenMonth: string | null = null;
-    let dipped = false;
-    for (const p of projection) {
-      if (p.cumulative < 0) dipped = true;
-      else if (dipped && p.cumulative >= 0) { breakEvenMonth = p.month; break; }
-    }
-
-    const minCumulative = projection.reduce((m, p) => Math.min(m, p.cumulative), startingCash);
-    const endCumulative = projection.length > 0 ? projection[projection.length - 1].cumulative : startingCash;
-
-    const savingsRate = monthlyIncome > 0 ? (monthlyNet / monthlyIncome) * 100 : 0;
-
-    return {
-      monthlyIncome, monthlyFixed, monthlyNet, savingsRate,
-      runwayMonths, burnOutMonth, breakEvenMonth,
-      minCumulative, endCumulative,
-    };
-  }, [income, expenses, projection, settings, startingCash]);
-
   // ---- Action handlers ----------------------------------------------------
   const handleDeleteIncome = (item: LifeIncomeRow) => {
     setErrorBanner(null);
@@ -408,23 +409,6 @@ export function LifeBudgetClient({
     });
   };
 
-  // ---- Preview slices (3 most recent / soonest) --------------------------
-  const recentIncome = useMemo(() =>
-    [...income].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 3),
-    [income]);
-  const recentExpenses = useMemo(() =>
-    [...expenses].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 3),
-    [expenses]);
-  const recentPurchases = useMemo(() => {
-    const today = dateToMonth(new Date());
-    return [...purchases].sort((a, b) => {
-      const af = a.target_month >= today, bf = b.target_month >= today;
-      if (af && !bf) return -1;
-      if (!af && bf) return 1;
-      if (af) return a.target_month.localeCompare(b.target_month);
-      return b.target_month.localeCompare(a.target_month);
-    }).slice(0, 3);
-  }, [purchases]);
 
   // Group purchase options by purchase for compact list display.
   const optionsByPurchase = useMemo(() => {
@@ -445,255 +429,249 @@ export function LifeBudgetClient({
     return ` · ${opts.length} option${opts.length > 1 ? "s" : ""}${chosen ? `: ${chosen.label}` : ""}`;
   };
 
+
+  // ---- Per-person projections & per-view derived data ---------------------
+  const groomProjection = useMemo(
+    () => personProjectionFor("groom", income, expenses, purchases, settings, perPersonStartingCash.groom),
+    [income, expenses, purchases, settings, perPersonStartingCash.groom]
+  );
+  const brideProjection = useMemo(
+    () => personProjectionFor("bride", income, expenses, purchases, settings, perPersonStartingCash.bride),
+    [income, expenses, purchases, settings, perPersonStartingCash.bride]
+  );
+
+  const activeProjection = view === "groom" ? groomProjection : view === "bride" ? brideProjection : null;
+  const heroIn = activeProjection ? (activeProjection[0]?.totalIn ?? 0) : (projection[0]?.income ?? 0);
+  const heroOut = activeProjection
+    ? (activeProjection[0]?.totalOut ?? 0)
+    : (projection[0]?.fixed ?? 0) + (projection[0]?.purchases ?? 0);
+  const heroNet = heroIn - heroOut;
+
+  const barSeries = (activeProjection ?? projection).slice(0, 12).map((p) => ({
+    month: p.month,
+    cumulative: p.cumulative,
+    hasPurchase: monthHasPurchase(purchases, p.month, view === "joint" ? undefined : (view as "groom" | "bride")),
+  }));
+  const cashRangeLabel = barSeries.length > 0
+    ? `${monthLabel(barSeries[0].month)} to ${monthLabel(barSeries[barSeries.length - 1].month)}`
+    : "";
+
+  const incomeRows = view === "joint" ? income : income.filter((i) => i.person === view || i.person === "both");
+  const expenseRows = view === "joint"
+    ? expenses
+    : expenses.filter((e) => personShare(e.payer, e.payer_groom_pct, view as "groom" | "bride") > 0);
+  const purchaseRows = view === "joint"
+    ? purchases
+    : purchases.filter((p) => personShare(p.payer, p.payer_groom_pct, view as "groom" | "bride") > 0);
+
+  const incomeAmount = (i: LifeIncomeRow) =>
+    view === "joint" ? Number(i.amount) : Number(i.amount) * (i.person === view ? 1 : 0.5);
+  const expenseAmount = (e: LifeExpenseRow) =>
+    view === "joint" ? Number(e.amount) : Number(e.amount) * personShare(e.payer, e.payer_groom_pct, view as "groom" | "bride");
+  const purchaseAmount = (p: LifePurchaseRow) => {
+    const remaining = Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0));
+    return view === "joint" ? remaining : remaining * personShare(p.payer, p.payer_groom_pct, view as "groom" | "bride");
+  };
+
+  usePageHeader("Add line", () => setExpenseDialog({ open: true, editing: null }));
+
   // ---- Render -------------------------------------------------------------
   return (
-    <section className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-      {/* Header */}
-      <div className="flex items-end justify-between mb-6 pb-5 border-b border-line max-md:flex-col max-md:items-start max-md:gap-4">
-        <div>
-          <h2 className="font-serif text-[42px] font-normal leading-none tracking-[-0.01em] mb-2">
-            Life <em>after</em>
-          </h2>
-          <p className="text-sm text-ink-soft">
-            Salaries, monthly bills, big purchases — see when the cashflow turns positive.
-          </p>
-        </div>
-        <Button variant="ghost" onClick={() => setSettingsOpen(true)}>⚙ Settings</Button>
-      </div>
-
-      {/* Settings strip — quick read-only summary */}
-      <div className="mb-6 px-5 py-3 bg-cream-deep/60 border border-line rounded-[4px] flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px]">
-        <span className="text-ink-soft">
-          Starting <strong className="text-ink font-mono">{monthLabel(settings.start_month)}</strong>
-        </span>
-        <span className="text-ink-soft">
-          Horizon <strong className="text-ink font-mono">{settings.horizon_months}mo</strong>
-        </span>
-        <span className="text-ink-soft">
-          Starting cash <strong className="text-ink font-mono">{formatMoney(startingCash)}</strong>
-          <span className="ml-1 text-ink-soft italic">
-            ({settings.starting_cash_mode === "from_wedding" ? "from wedding" : "manual"})
-          </span>
-        </span>
+    <section className="font-apple flex flex-col gap-7 text-[var(--fg)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Segmented
+          options={[
+            { value: "joint", label: "Household" },
+            { value: "groom", label: "Celal" },
+            { value: "bride", label: "Selver" },
+            { value: "calendar", label: "Calendar" },
+          ]}
+          value={view}
+          onChange={setView}
+        />
+        <button type="button" onClick={() => setSettingsOpen(true)} className="text-[15px] text-[var(--accent)] hover:opacity-60">
+          Settings
+        </button>
       </div>
 
       {errorBanner && (
-        <div className="mb-4 px-5 py-3 bg-burgundy/10 border border-burgundy/30 rounded-[4px] flex items-center justify-between text-[12px] text-burgundy">
+        <div className="flex items-center justify-between rounded-[12px] bg-[var(--fill)] px-[18px] py-3 text-[13px] text-[var(--accent)]">
           <span>{errorBanner}</span>
           <button type="button" onClick={() => setErrorBanner(null)} className="ml-4 text-[16px] leading-none opacity-70 hover:opacity-100">×</button>
         </div>
       )}
 
-      <ViewSwitcher view={view} onChange={setView} />
-
-      {view === "joint" && (
-      <>
-      {/* KPIs */}
-      <div className="grid grid-cols-5 gap-4 max-lg:grid-cols-3 max-md:grid-cols-2 max-sm:grid-cols-1 mb-8">
-        <KPI
-          label="Monthly income"
-          value={formatMoney(kpis.monthlyIncome)}
-          accent="sage"
-          meta={`${income.length} stream${income.length === 1 ? "" : "s"}`}
-        />
-        <KPI
-          label="Monthly fixed"
-          value={formatMoney(kpis.monthlyFixed)}
-          accent="burgundy"
-          meta={`${expenses.length} bill${expenses.length === 1 ? "" : "s"}`}
-        />
-        <KPI
-          label="Monthly net"
-          value={formatMoney(kpis.monthlyNet)}
-          accent={kpis.monthlyNet >= 0 ? "sage" : "burgundy"}
-          meta={kpis.monthlyIncome > 0 ? `${kpis.savingsRate.toFixed(0)}% savings rate` : "—"}
-        />
-        <KPI
-          label="Break-even"
-          value={
-            kpis.burnOutMonth === null
-              ? "Always +"
-              : kpis.breakEvenMonth
-                ? monthLabel(kpis.breakEvenMonth)
-                : "Beyond horizon"
-          }
-          accent="gold"
-          meta={kpis.burnOutMonth ? `Dips below 0 in ${monthLabel(kpis.burnOutMonth)}` : "Cumulative cash never negative"}
-        />
-        <KPI
-          label="Runway"
-          value={kpis.runwayMonths === Infinity ? "∞" : `${kpis.runwayMonths}mo`}
-          accent="ink"
-          meta={kpis.runwayMonths === Infinity ? "Income covers fixed costs" : "If income stopped"}
-        />
-      </div>
-
-      {/* Cashflow chart */}
-      <div className="bg-paper border border-line rounded-[4px] p-6 shadow-soft mb-8">
-        <div className="flex items-baseline justify-between mb-4 flex-wrap gap-2">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.3em] text-ink-soft mb-1 font-medium">
-              Cashflow projection
-            </div>
-            <h3 className="font-serif text-[22px] text-ink">
-              {kpis.endCumulative >= 0
-                ? <>You end up with <em>{formatMoney(kpis.endCumulative)}</em></>
-                : <>Cumulative dips to <em className="text-burgundy">{formatMoney(kpis.minCumulative)}</em></>
-              }
-            </h3>
-          </div>
-          <div className="text-[12px] text-ink-soft">
-            Toggle purchases on/off below to see scenarios live.
-          </div>
-        </div>
-        <CashflowChart projection={projection} purchases={purchases.filter((p) => p.scheduled)} />
-        <div className="grid grid-cols-4 gap-4 mt-5 max-md:grid-cols-2 text-[12px]">
-          <Legend swatch="#7c8a6b" label="Monthly income" />
-          <Legend swatch="#7a1f2b" label="Fixed bills" />
-          <Legend swatch="#c79b3a" label="One-off purchases" />
-          <Legend swatch="#3d2c2e" label="Cumulative cash" />
-        </div>
-      </div>
-
-      {/* Per-person card */}
-      <div className="grid grid-cols-2 gap-5 max-md:grid-cols-1 mb-8">
-        <PersonMonthly name="Groom" accent="sage" income={income} expenses={expenses} purchases={purchases} person="groom" startingCash={perPersonStartingCash.groom} />
-        <PersonMonthly name="Bride" accent="rose" income={income} expenses={expenses} purchases={purchases} person="bride" startingCash={perPersonStartingCash.bride} />
-      </div>
-
-      {/* Three sections */}
-      <div className="grid grid-cols-3 gap-5 max-lg:grid-cols-1">
-        <SectionCard
-          title="Income"
-          emoji="💼"
-          accent="sage"
-          empty="Add salaries or other monthly income."
-          totalCount={income.length}
-          onAdd={() => setIncomeDialog({ open: true, editing: null })}
-          onViewAll={() => setExpandedSection("income")}
-          items={recentIncome.map((i) => ({
-            id: i.id,
-            primary: i.name,
-            secondary: `${personLabel(i.person)}${i.start_month ? ` · from ${monthLabel(i.start_month)}` : ""}${i.end_month ? ` · until ${monthLabel(i.end_month)}` : ""}`,
-            value: `+${formatMoney(i.amount)}/mo`,
-            valueClass: "text-sage",
-            onClick: () => setIncomeDialog({ open: true, editing: i }),
-            onDelete: () => handleDeleteIncome(i),
-          }))}
-        />
-
-        <SectionCard
-          title="Recurring expenses"
-          emoji="🔁"
-          accent="burgundy"
-          empty="Add rent, utilities, subscriptions…"
-          totalCount={expenses.length}
-          onAdd={() => setExpenseDialog({ open: true, editing: null })}
-          onViewAll={() => setExpandedSection("expense")}
-          items={recentExpenses.map((e) => ({
-            id: e.id,
-            primary: e.name,
-            secondary: e.expense_type === "credit"
-              ? `Credit · ${e.credit_months}mo${e.credit_interest_rate ? ` @ ${e.credit_interest_rate}%` : ""} · ${e.start_month ? monthLabel(e.start_month) : "?"} → ${e.end_month ? monthLabel(e.end_month) : "?"} · ${payerLabel(e.payer, e.payer_groom_pct)}${e.breakdown_items?.length ? ` · ${e.breakdown_items.length} items` : ""}`
-              : `${e.category ?? "—"} · ${payerLabel(e.payer, e.payer_groom_pct)}${e.breakdown_items?.length ? ` · ${e.breakdown_items.length} items` : ""}`,
-            value: isExternalPayer(e.payer) ? formatMoney(e.amount) : `−${formatMoney(e.amount)}/mo`,
-            valueClass: isExternalPayer(e.payer) ? "text-ink-soft" : "text-burgundy",
-            onClick: () => setExpenseDialog({ open: true, editing: e }),
-            onDelete: () => handleDeleteExpense(e),
-          }))}
-        />
-
-        <SectionCard
-          title="One-time purchases"
-          emoji="🛋️"
-          emojiTitle="Check to include / uncheck to exclude from projection"
-          accent="gold"
-          empty="Plan furniture, appliances, big buys."
-          totalCount={purchases.length}
-          onAdd={() => setPurchaseDialog({ open: true, editing: null })}
-          onViewAll={() => setExpandedSection("purchase")}
-          items={recentPurchases.map((p) => {
-            const paid = Number(p.already_paid ?? 0);
-            const remaining = Math.max(0, Number(p.amount) - paid);
-            return {
-              id: p.id,
-              primary: p.name,
-              secondary: (paid > 0
-                ? `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${formatMoney(paid)} paid of ${formatMoney(p.amount)} · ${payerLabel(p.payer, p.payer_groom_pct)}`
-                : `${p.category ?? "—"} · ${monthLabel(p.target_month)} · ${payerLabel(p.payer, p.payer_groom_pct)}`) + optionsSuffix(p) + (p.breakdown_items?.length ? ` · ${p.breakdown_items.length} items` : ""),
-              value: isExternalPayer(p.payer)
-                ? formatMoney(p.amount)
-                : (paid > 0 ? `−${formatMoney(remaining)}` : `−${formatMoney(p.amount)}`),
-              valueClass: isExternalPayer(p.payer)
-                ? "text-ink-soft"
-                : p.scheduled ? (remaining === 0 ? "text-sage" : "text-burgundy") : "text-ink-soft line-through",
-              onClick: () => setPurchaseDialog({ open: true, editing: p }),
-              onDelete: () => handleDeletePurchase(p),
-              onToggle: () => handleToggleScheduled(p),
-              toggled: p.scheduled,
-            };
-          })}
-        />
-      </div>
-
-      {/* Wedding savings section — simplified for joint view */}
-      <div className="mt-8">
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Wedding savings</div>
-            <div className="font-serif text-[18px] text-ink mt-0.5">
-              Combined pot — <em>{formatMoney(weddingCashOnHand)}</em> cash on hand
-            </div>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            <Button variant="ghost" size="sm" onClick={() => setTransferDialogOpen(true)}>⇄ Transfer to Common</Button>
-            <Button variant="ghost" size="sm" onClick={() => setExpandedSavingsOpen(true)}>View all ↗</Button>
-            <Button size="sm" onClick={() => setSavingsDialog({ open: true, editing: null })}>+ Log savings</Button>
-          </div>
-        </div>
-        {/* Compact three-pot summary */}
-        <div className="grid grid-cols-3 gap-4 max-md:grid-cols-1">
-          <div className="bg-paper border border-line border-l-[3px] border-l-sage rounded-[4px] p-4 shadow-soft">
-            <div className="text-[10px] uppercase tracking-[0.3em] text-sage font-medium mb-1">Groom</div>
-            <div className="font-serif text-[24px] text-ink"><em>{formatMoney(perPersonStartingCash.groomSaved)}</em></div>
-            <div className="text-[11px] text-ink-soft mt-1">→ starts with {formatMoney(perPersonStartingCash.groom)}</div>
-          </div>
-          <div className="bg-paper border border-line border-l-[3px] border-l-rose rounded-[4px] p-4 shadow-soft">
-            <div className="text-[10px] uppercase tracking-[0.3em] text-rose font-medium mb-1">Bride</div>
-            <div className="font-serif text-[24px] text-ink"><em>{formatMoney(perPersonStartingCash.brideSaved)}</em></div>
-            <div className="text-[11px] text-ink-soft mt-1">→ starts with {formatMoney(perPersonStartingCash.bride)}</div>
-          </div>
-          <div className="bg-paper border border-line border-l-[3px] border-l-gold rounded-[4px] p-4 shadow-soft">
-            <div className="text-[10px] uppercase tracking-[0.3em] text-gold font-medium mb-1">Common</div>
-            <div className="font-serif text-[24px] text-ink"><em>{formatMoney(perPersonStartingCash.commonSaved)}</em></div>
-            <div className="text-[11px] text-ink-soft mt-1">÷2 to each person</div>
-          </div>
-        </div>
-      </div>
-      </>
-      )}
-
-      {(view === "groom" || view === "bride") && (
-        <PersonView
-          person={view}
+      {view === "calendar" ? (
+        <CalendarView
           income={income}
           expenses={expenses}
           purchases={purchases}
-          savings={savings}
           settings={settings}
-          personStartingCash={view === "groom" ? perPersonStartingCash.groom : perPersonStartingCash.bride}
-          savingsPots={perPersonStartingCash}
-          onEditIncome={(i) => setIncomeDialog({ open: true, editing: i })}
-          onEditExpense={(e) => setExpenseDialog({ open: true, editing: e })}
-          onEditPurchase={(p) => setPurchaseDialog({ open: true, editing: p })}
-          onEditSaving={(s) => setSavingsDialog({ open: true, editing: s })}
-          onAdd={(type) => {
-            if (type === "income") setIncomeDialog({ open: true, editing: null });
-            else if (type === "expense") setExpenseDialog({ open: true, editing: null });
-            else if (type === "purchase") setPurchaseDialog({ open: true, editing: null });
-            else if (type === "saving") setSavingsDialog({ open: true, editing: null });
-          }}
+          startingCash={weddingCashOnHand}
+          groomStartingCash={perPersonStartingCash.groom}
+          brideStartingCash={perPersonStartingCash.bride}
+          projection={projection}
+          onAssignDay={handleAssignDay}
         />
+      ) : (
+        <>
+          <div className="px-1 py-0.5">
+            <div className="text-[clamp(38px,6vw,54px)] leading-none font-bold tracking-[-0.04em] tabular-nums">
+              {formatMoney(heroNet)} left over
+            </div>
+            <div className="mt-3 text-[16px] tracking-[-0.012em] text-[var(--fg2)]">
+              {formatMoney(heroIn)} in · {formatMoney(heroOut)} out, every month
+            </div>
+          </div>
+
+          <ListGroup label={`Projected cash · ${cashRangeLabel}`}>
+            <div className="px-[18px] pt-5 pb-[18px]">
+              <CashBars series={barSeries} />
+            </div>
+          </ListGroup>
+
+          <ListGroup
+            label={
+              <div className="flex items-center justify-between">
+                <span>Income each month</span>
+                <button
+                  type="button"
+                  onClick={() => setIncomeDialog({ open: true, editing: null })}
+                  className="text-[var(--accent)] hover:opacity-60"
+                >
+                  + Add
+                </button>
+              </div>
+            }
+          >
+            {incomeRows.length === 0 ? (
+              <ListRow><span className="text-[15px] text-[var(--fg2)]">No income yet.</span></ListRow>
+            ) : (
+              incomeRows.map((i) => (
+                <ListRow key={i.id} as="button" interactive onClick={() => setIncomeDialog({ open: true, editing: i })}>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[17px] tracking-[-0.014em]">{i.name}</div>
+                    <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">
+                      {personLabel(i.person)}
+                      {i.start_month ? ` · from ${monthLabel(i.start_month)}` : ""}
+                      {i.end_month ? ` · until ${monthLabel(i.end_month)}` : ""}
+                    </div>
+                  </div>
+                  <span className="ml-auto text-[17px] tabular-nums whitespace-nowrap">{formatMoney(incomeAmount(i))}/mo</span>
+                </ListRow>
+              ))
+            )}
+          </ListGroup>
+
+          <ListGroup
+            label={
+              <div className="flex items-center justify-between">
+                <span>Costs each month</span>
+                <button
+                  type="button"
+                  onClick={() => setExpenseDialog({ open: true, editing: null })}
+                  className="text-[var(--accent)] hover:opacity-60"
+                >
+                  + Add
+                </button>
+              </div>
+            }
+          >
+            {expenseRows.length === 0 ? (
+              <ListRow><span className="text-[15px] text-[var(--fg2)]">No recurring costs yet.</span></ListRow>
+            ) : (
+              expenseRows.map((e) => (
+                <ListRow key={e.id} as="button" interactive onClick={() => setExpenseDialog({ open: true, editing: e })}>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[17px] tracking-[-0.014em]">{e.name}</div>
+                    <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">
+                      {e.expense_type === "credit"
+                        ? `Credit · ${e.credit_months}mo${e.credit_interest_rate ? ` @ ${e.credit_interest_rate}%` : ""} · ${payerLabel(e.payer, e.payer_groom_pct)}`
+                        : `${e.category ?? "—"} · ${payerLabel(e.payer, e.payer_groom_pct)}`}
+                    </div>
+                  </div>
+                  <span className="ml-auto text-[17px] tabular-nums whitespace-nowrap text-[var(--fg2)]">
+                    {formatMoney(expenseAmount(e))}/mo
+                  </span>
+                </ListRow>
+              ))
+            )}
+          </ListGroup>
+
+          <ListGroup
+            label={
+              <div className="flex items-center justify-between">
+                <span>Planned purchases</span>
+                <button
+                  type="button"
+                  onClick={() => setPurchaseDialog({ open: true, editing: null })}
+                  className="text-[var(--accent)] hover:opacity-60"
+                >
+                  + Add
+                </button>
+              </div>
+            }
+          >
+            {purchaseRows.length === 0 ? (
+              <ListRow><span className="text-[15px] text-[var(--fg2)]">No purchases planned yet.</span></ListRow>
+            ) : (
+              purchaseRows.map((p) => (
+                <ListRow key={p.id} as="button" interactive onClick={() => setPurchaseDialog({ open: true, editing: p })}>
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className="text-[17px] tracking-[-0.014em]"
+                      style={!p.scheduled ? { color: "var(--fg3)", textDecoration: "line-through" } : undefined}
+                    >
+                      {p.name}
+                    </div>
+                    <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">
+                      {monthLabel(p.target_month)} · {payerLabel(p.payer, p.payer_groom_pct)}{optionsSuffix(p)}
+                    </div>
+                  </div>
+                  <span className="ml-auto text-[17px] tabular-nums whitespace-nowrap text-[var(--fg2)]">
+                    {formatMoney(purchaseAmount(p))}
+                  </span>
+                </ListRow>
+              ))
+            )}
+          </ListGroup>
+
+          <div>
+            <div className="px-[18px] pb-[7px] text-[13px] tracking-[-0.004em] text-[var(--fg2)]">Wedding savings</div>
+            <div className="overflow-hidden rounded-[12px] bg-[var(--card)]">
+              <ListRow>
+                <span className="text-[17px] tracking-[-0.014em]">Celal</span>
+                <span className="ml-auto text-[17px] tabular-nums text-[var(--fg2)]">{formatMoney(perPersonStartingCash.groomSaved)}</span>
+              </ListRow>
+              <ListRow>
+                <span className="text-[17px] tracking-[-0.014em]">Selver</span>
+                <span className="ml-auto text-[17px] tabular-nums text-[var(--fg2)]">{formatMoney(perPersonStartingCash.brideSaved)}</span>
+              </ListRow>
+              <ListRow>
+                <span className="text-[17px] tracking-[-0.014em]">Common</span>
+                <span className="ml-auto text-[17px] tabular-nums text-[var(--fg2)]">{formatMoney(perPersonStartingCash.commonSaved)}</span>
+              </ListRow>
+            </div>
+            <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 px-1 text-[15px]">
+              <button type="button" onClick={() => setTransferDialogOpen(true)} className="text-[var(--accent)] hover:opacity-60">
+                Transfer to common
+              </button>
+              <button type="button" onClick={() => setExpandedSavingsOpen(true)} className="text-[var(--accent)] hover:opacity-60">
+                View all
+              </button>
+              <button type="button" onClick={() => setSavingsDialog({ open: true, editing: null })} className="text-[var(--accent)] hover:opacity-60">
+                Log savings
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-x-4 gap-y-1 px-1 text-[13px] text-[var(--fg3)]">
+            <span>Search a longer list:</span>
+            <button type="button" onClick={() => setExpandedSection("income")} className="hover:text-[var(--accent)]">Income</button>
+            <button type="button" onClick={() => setExpandedSection("expense")} className="hover:text-[var(--accent)]">Costs</button>
+            <button type="button" onClick={() => setExpandedSection("purchase")} className="hover:text-[var(--accent)]">Purchases</button>
+          </div>
+        </>
       )}
 
       {/* Expanded section dialogs */}
@@ -784,7 +762,6 @@ export function LifeBudgetClient({
               const next = exists ? prev.map((i) => (i.id === row.id ? row : i)) : [...prev, row];
               return next.sort((a, b) => a.target_month.localeCompare(b.target_month));
             });
-            // Replace this purchase's options with the freshly persisted set.
             setPurchaseOptions((prev) => [...prev.filter((o) => o.purchase_id !== row.id), ...options]);
           }}
         />
@@ -824,20 +801,6 @@ export function LifeBudgetClient({
         />
       )}
 
-      {view === "calendar" && (
-        <CalendarView
-          income={income}
-          expenses={expenses}
-          purchases={purchases}
-          settings={settings}
-          startingCash={weddingCashOnHand}
-          groomStartingCash={perPersonStartingCash.groom}
-          brideStartingCash={perPersonStartingCash.bride}
-          projection={projection}
-          onAssignDay={handleAssignDay}
-        />
-      )}
-
       <Dialog open={confirmState.open} onOpenChange={(o) => setConfirmState((s) => ({ ...s, open: o }))}>
         <DialogContent>
           <DialogHeader>
@@ -858,6 +821,42 @@ export function LifeBudgetClient({
 // Display helpers
 // ============================================================================
 
+/** The 12-bar cash projection chart from the design handoff: bar height is
+ *  cumulative cash for the month, accent-colored when a purchase lands then. */
+function CashBars({ series }: { series: { month: string; cumulative: number; hasPurchase: boolean }[] }) {
+  const max = Math.max(1, ...series.map((s) => s.cumulative));
+  const last = series[series.length - 1];
+  return (
+    <div>
+      <div className="flex h-[150px] items-end gap-[clamp(3px,0.9vw,9px)]">
+        {series.map((s) => (
+          <div
+            key={s.month}
+            title={formatMoney(s.cumulative)}
+            className="min-h-[4px] flex-1 rounded-[2px]"
+            style={{
+              height: `${Math.max(0, (s.cumulative / max) * 100)}%`,
+              background: s.hasPurchase ? "var(--accent)" : "var(--fill)",
+            }}
+          />
+        ))}
+      </div>
+      <div className="mt-2.5 flex gap-[clamp(3px,0.9vw,9px)] border-t border-[var(--sep)] pt-2">
+        {series.map((s) => (
+          <div key={s.month} className="flex-1 text-center text-[11px] text-[var(--fg3)]">
+            {monthToDate(s.month).toLocaleDateString("en-GB", { month: "short" }).charAt(0)}
+          </div>
+        ))}
+      </div>
+      {last && (
+        <div className="mt-3 text-[13px] text-[var(--fg2)]">
+          Ends at {formatMoney(last.cumulative)}. Highlighted months carry a planned purchase.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function personLabel(p: LifePerson): string {
   return p === "both" ? "Joint" : p === "groom" ? "Groom" : "Bride";
 }
@@ -869,1234 +868,15 @@ function payerLabel(payer: ExpensePayer, pct: number | null): string {
   return payer === "groom" ? "Groom" : "Bride";
 }
 
-// ============================================================================
-// Cashflow chart — pure SVG
-// ============================================================================
-
-type ProjectionPoint = {
-  month: string;
-  income: number;
-  fixed: number;
-  purchases: number;
-  net: number;
-  cumulative: number;
-};
-
-function CashflowChart({
-  projection,
-  purchases,
-}: {
-  projection: ProjectionPoint[];
-  purchases: LifePurchaseRow[];
-}) {
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-
-  if (projection.length === 0) {
-    return <p className="text-[13px] italic text-ink-soft text-center py-12">Adjust settings to see the projection.</p>;
-  }
-
-  const width = 920;
-  const height = 340;
-  const padTop = 28;
-  const padBottom = 42;
-  const padLeft = 68;
-  const padRight = 20;
-  const innerW = width - padLeft - padRight;
-  const innerH = height - padTop - padBottom;
-
-  // Cumulative Y scale
-  const cumValues = projection.map((p) => p.cumulative);
-  const rawMin = Math.min(0, ...cumValues);
-  const rawMax = Math.max(0, ...cumValues);
-  const cushion = (rawMax - rawMin) * 0.08 || 500;
-  const yMin = rawMin - cushion;
-  const yMax = rawMax + cushion;
-  const range = yMax - yMin || 1;
-
-  const yFor = (v: number) => padTop + ((yMax - v) / range) * innerH;
-  const zeroY = yFor(0);
-
-  // Bar scale: normalised to 28% of chart height so bars are always visible
-  const maxFlow = Math.max(...projection.map((p) => Math.max(p.income, p.fixed + p.purchases)), 1);
-  const barH = (v: number) => Math.max(1, (v / maxFlow) * innerH * 0.28);
-
-  const stepX = innerW / Math.max(1, projection.length);
-  const xFor = (i: number) => padLeft + (i + 0.5) * stepX;
-  const barW = Math.min(stepX * 0.28, 10);
-
-  // Cumulative path
-  const linePath = projection.map((p, i) => `${i === 0 ? "M" : "L"} ${xFor(i)} ${yFor(p.cumulative)}`).join(" ");
-  const areaPath = `${linePath} L ${xFor(projection.length - 1)} ${zeroY} L ${xFor(0)} ${zeroY} Z`;
-
-  // Gradient split at zero
-  const zeroFrac = Math.max(0.001, Math.min(0.999, (zeroY - padTop) / innerH));
-
-  // Find break-even crossing
-  let breakEvenIdx: number | null = null;
-  let dipped = false;
-  for (let i = 0; i < projection.length; i++) {
-    if (projection[i].cumulative < 0) dipped = true;
-    else if (dipped && projection[i].cumulative >= 0) { breakEvenIdx = i; break; }
-  }
-
-  // Y-axis ticks
-  const tickValues: number[] = [];
-  for (let i = 0; i <= 6; i++) tickValues.push(yMin + (range * i) / 6);
-
-  const labelEvery = Math.max(1, Math.ceil(projection.length / 14));
-
-  return (
-    <div className="relative overflow-x-auto select-none">
-      {/* Hover tooltip */}
-      {hoveredIdx !== null && (() => {
-        const p = projection[hoveredIdx];
-        const cx = xFor(hoveredIdx);
-        const relX = cx - padLeft;
-        const flipLeft = relX > innerW * 0.62;
-        return (
-          <div
-            className="absolute top-6 pointer-events-none z-10 bg-ink/95 text-cream text-[11px] rounded-[6px] px-3.5 py-2.5 shadow-xl min-w-[170px] backdrop-blur-sm"
-            style={{ left: Math.max(0, flipLeft ? cx - 182 : cx - padLeft + 14) }}
-          >
-            <div className="font-serif text-[13px] mb-2 border-b border-cream/15 pb-1.5">{monthLabel(p.month)}</div>
-            <div className="space-y-1">
-              <div className="flex justify-between gap-6">
-                <span className="text-cream/50">Income</span>
-                <span className="text-[#a8c49a] font-mono">+{formatMoney(p.income)}</span>
-              </div>
-              <div className="flex justify-between gap-6">
-                <span className="text-cream/50">Bills</span>
-                <span className="text-[#c47a7a] font-mono">−{formatMoney(p.fixed)}</span>
-              </div>
-              {p.purchases > 0 && (
-                <div className="flex justify-between gap-6">
-                  <span className="text-cream/50">Purchases</span>
-                  <span className="text-[#e0ba6a] font-mono">−{formatMoney(p.purchases)}</span>
-                </div>
-              )}
-              <div className="flex justify-between gap-6 pt-1 mt-1 border-t border-cream/15">
-                <span className="text-cream/50">Net</span>
-                <span className={`font-mono font-semibold ${p.net >= 0 ? "text-[#a8c49a]" : "text-[#c47a7a]"}`}>
-                  {p.net >= 0 ? "+" : ""}{formatMoney(p.net)}
-                </span>
-              </div>
-              <div className="flex justify-between gap-6">
-                <span className="text-cream/50">Cash</span>
-                <span className={`font-mono font-semibold ${p.cumulative >= 0 ? "text-[#a8c49a]" : "text-[#c47a7a]"}`}>
-                  {formatMoney(p.cumulative)}
-                </span>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      <svg
-        width={width}
-        height={height}
-        viewBox={`0 0 ${width} ${height}`}
-        className="min-w-[640px] cursor-crosshair"
-        onMouseMove={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          const svgX = (e.clientX - rect.left) * (width / rect.width);
-          const idx = Math.floor((svgX - padLeft) / stepX);
-          setHoveredIdx(idx >= 0 && idx < projection.length ? idx : null);
-        }}
-        onMouseLeave={() => setHoveredIdx(null)}
-      >
-        <defs>
-          {/* Gradient for cumulative area: green above zero, red below */}
-          <linearGradient id="areaGrad" x1="0" y1={padTop} x2="0" y2={padTop + innerH} gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor="#7c8a6b" stopOpacity="0.45" />
-            <stop offset={zeroFrac * 0.88} stopColor="#7c8a6b" stopOpacity="0.12" />
-            <stop offset={zeroFrac} stopColor="#7a1f2b" stopOpacity="0.12" />
-            <stop offset="1" stopColor="#7a1f2b" stopOpacity="0.45" />
-          </linearGradient>
-          {/* Income bar gradient (top = solid, bottom = transparent) */}
-          <linearGradient id="incGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#7c8a6b" stopOpacity="0.9" />
-            <stop offset="1" stopColor="#7c8a6b" stopOpacity="0.35" />
-          </linearGradient>
-          {/* Expense bar gradient */}
-          <linearGradient id="expGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#7a1f2b" stopOpacity="0.35" />
-            <stop offset="1" stopColor="#7a1f2b" stopOpacity="0.9" />
-          </linearGradient>
-        </defs>
-
-        {/* Chart area background */}
-        <rect x={padLeft} y={padTop} width={innerW} height={innerH} fill="#faf5e9" opacity="0.5" rx={3} />
-
-        {/* Grid lines */}
-        {tickValues.map((v, i) => {
-          const y = yFor(v);
-          if (y < padTop - 2 || y > padTop + innerH + 2) return null;
-          const isZero = Math.abs(v) < range * 0.001;
-          return (
-            <line key={i}
-              x1={padLeft} x2={width - padRight} y1={y} y2={y}
-              stroke={isZero ? "#3d2c2e" : "#e6dccd"}
-              strokeWidth={isZero ? 1.5 : 0.8}
-              strokeDasharray={isZero ? "5 4" : undefined}
-              opacity={isZero ? 0.6 : 1}
-            />
-          );
-        })}
-
-        {/* Y-axis labels */}
-        {tickValues.map((v, i) => {
-          const y = yFor(v);
-          if (y < padTop - 6 || y > padTop + innerH + 6) return null;
-          return (
-            <text key={i} x={padLeft - 10} y={y + 3.5} textAnchor="end" fontSize={10} fill="#7a6f60" fontFamily="monospace">
-              {formatMoneyShort(v)}
-            </text>
-          );
-        })}
-
-        {/* Hover column highlight */}
-        {hoveredIdx !== null && (
-          <rect
-            x={padLeft + hoveredIdx * stepX}
-            y={padTop}
-            width={stepX}
-            height={innerH}
-            fill="#3d2c2e"
-            opacity={0.045}
-          />
-        )}
-
-        {/* Income bars — going UP from zero axis */}
-        {projection.map((p, i) => {
-          const cx = xFor(i);
-          const h = barH(p.income);
-          return (
-            <rect key={"inc-" + p.month}
-              x={cx - barW - 1}
-              y={zeroY - h}
-              width={barW}
-              height={h}
-              fill="url(#incGrad)"
-              opacity={hoveredIdx === i ? 1 : 0.7}
-              rx={1.5}
-            />
-          );
-        })}
-
-        {/* Expense bars — going DOWN from zero axis (fixed + purchases stacked) */}
-        {projection.map((p, i) => {
-          const cx = xFor(i);
-          const fixH = barH(p.fixed);
-          const purH = p.purchases > 0 ? barH(p.purchases) : 0;
-          return (
-            <g key={"exp-" + p.month}>
-              <rect
-                x={cx + 1}
-                y={zeroY}
-                width={barW}
-                height={fixH}
-                fill="url(#expGrad)"
-                opacity={hoveredIdx === i ? 0.95 : 0.65}
-                rx={1.5}
-              />
-              {purH > 0 && (
-                <rect
-                  x={cx + 1}
-                  y={zeroY + fixH}
-                  width={barW}
-                  height={purH}
-                  fill="#c79b3a"
-                  opacity={hoveredIdx === i ? 1 : 0.75}
-                  rx={1.5}
-                />
-              )}
-            </g>
-          );
-        })}
-
-        {/* Cumulative area fill */}
-        <path d={areaPath} fill="url(#areaGrad)" />
-
-        {/* Cumulative line */}
-        <path d={linePath} fill="none" stroke="#3d2c2e" strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />
-
-        {/* Cumulative dots — colored by positive/negative */}
-        {projection.map((p, i) => (
-          <circle key={"cd-" + p.month}
-            cx={xFor(i)}
-            cy={yFor(p.cumulative)}
-            r={hoveredIdx === i ? 4.5 : 2.5}
-            fill={p.cumulative >= 0 ? "#7c8a6b" : "#7a1f2b"}
-            stroke="#faf5e9"
-            strokeWidth={hoveredIdx === i ? 1.5 : 1}
-          />
-        ))}
-
-        {/* Break-even marker */}
-        {breakEvenIdx !== null && (() => {
-          const p = projection[breakEvenIdx];
-          const cx = xFor(breakEvenIdx);
-          const cy = yFor(p.cumulative);
-          const labelRight = cx < padLeft + innerW * 0.75;
-          return (
-            <g>
-              <line x1={cx} x2={cx} y1={padTop} y2={cy - 12} stroke="#c79b3a" strokeWidth={1} strokeDasharray="4 3" opacity={0.55} />
-              <circle cx={cx} cy={cy} r={8} fill="#c79b3a" opacity={0.9} />
-              <circle cx={cx} cy={cy} r={4} fill="#faf5e9" opacity={0.8} />
-              <text
-                x={labelRight ? cx + 12 : cx - 12}
-                y={cy - 10}
-                textAnchor={labelRight ? "start" : "end"}
-                fontSize={9.5}
-                fill="#c79b3a"
-                fontFamily="ui-sans-serif"
-                fontWeight="700"
-                letterSpacing="0.08em"
-              >
-                BREAK EVEN
-              </text>
-            </g>
-          );
-        })()}
-
-        {/* Hover vertical crosshair */}
-        {hoveredIdx !== null && (
-          <line
-            x1={xFor(hoveredIdx)} x2={xFor(hoveredIdx)}
-            y1={padTop} y2={padTop + innerH}
-            stroke="#3d2c2e" strokeWidth={1} strokeDasharray="5 4" opacity={0.25}
-          />
-        )}
-
-        {/* X-axis labels */}
-        {projection.map((p, i) => {
-          if (i % labelEvery !== 0 && i !== projection.length - 1) return null;
-          const active = hoveredIdx === i;
-          return (
-            <text key={"xl-" + p.month}
-              x={xFor(i)}
-              y={height - 14}
-              textAnchor="middle"
-              fontSize={active ? 10 : 9.5}
-              fill={active ? "#3d2c2e" : "#7a6f60"}
-              fontFamily="ui-sans-serif"
-              fontWeight={active ? "700" : "400"}
-            >
-              {monthShort(p.month)}
-            </text>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
-
-/** Compact money for chart axis: €1.2k, €750, etc. */
 function formatMoneyShort(n: number): string {
   if (Math.abs(n) >= 1000) return `€${(n / 1000).toFixed(1)}k`;
   return `€${Math.round(n)}`;
 }
 
-// ============================================================================
-// Personal cashflow chart (per-person savings trajectory)
-// ============================================================================
-
+// Shared shape for a month's projected cash position (household or per-person).
 type PersonPoint = { month: string; net: number; cumulative: number; totalIn: number; totalOut: number };
 
-function PersonCashflowChart({ projection, person, startingCash }: { projection: PersonPoint[]; person: "groom" | "bride"; startingCash: number }) {
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-  if (projection.length === 0) return null;
-
-  const color = person === "groom" ? "#7c8a6b" : "#a85c72";
-  const W = 860, H = 220, pT = 24, pB = 36, pL = 64, pR = 16;
-  const iW = W - pL - pR, iH = H - pT - pB;
-
-  const cumValues = projection.map((p) => p.cumulative);
-
-  // Base Y range on actual values — startingCash is the natural baseline.
-  // DO NOT force 0 into the range: when savings exist the chart must zoom
-  // to the savings-to-projection range so the anchor is visually prominent.
-  const rawMin = Math.min(startingCash, ...cumValues);
-  const rawMax = Math.max(startingCash, ...cumValues);
-  const span = rawMax - rawMin || 1;
-  const pad = Math.max(span * 0.14, 400);
-  const yMin = rawMin - pad, yMax = rawMax + pad, range = yMax - yMin || 1;
-
-  const yFor = (v: number) => pT + ((yMax - v) / range) * iH;
-  const startY = yFor(startingCash);
-
-  // Zero line — only drawn when 0 falls within the visible Y range.
-  const zeroY = yFor(0);
-  const zeroInView = zeroY >= pT && zeroY <= pT + iH;
-
-  // Gradient stop fraction for the fill — anchored at startingCash rather
-  // than 0 so the gradient correctly marks the savings baseline.
-  const startFrac = Math.max(0.001, Math.min(0.999, (startY - pT) / iH));
-
-  const stepX = iW / Math.max(1, projection.length);
-  const xFor = (i: number) => pL + (i + 0.5) * stepX;
-  const barW = Math.min(stepX * 0.45, 12);
-
-  // Line starts at the savings anchor on the left edge.
-  const linePath = `M ${pL} ${startY} ` + projection.map((p, i) => `L ${xFor(i)} ${yFor(p.cumulative)}`).join(" ");
-  // Area fills down to startingCash baseline (not 0).
-  const areaPath = `${linePath} L ${xFor(projection.length - 1)} ${startY} L ${pL} ${startY} Z`;
-  const maxFlow = Math.max(...projection.map((p) => Math.max(Math.abs(p.net), 1)), 1);
-  const labelEvery = Math.max(1, Math.ceil(projection.length / 12));
-
-  return (
-    <div className="relative overflow-x-auto select-none">
-      {hoveredIdx !== null && (() => {
-        const p = projection[hoveredIdx];
-        const cx = xFor(hoveredIdx);
-        const flip = cx - pL > iW * 0.65;
-        const delta = p.cumulative - startingCash;
-        return (
-          <div
-            className="absolute top-3 pointer-events-none z-10 bg-ink/92 text-cream text-[11px] rounded-[5px] px-3 py-2 shadow-lg min-w-[170px]"
-            style={{ left: Math.max(0, flip ? cx - 186 : cx - pL + 10) }}
-          >
-            <div className="font-serif text-[12px] mb-1.5 border-b border-cream/15 pb-1">{monthLabel(p.month)}</div>
-            <div className="space-y-1">
-              <div className="flex justify-between gap-5"><span className="text-cream/50">In</span><span className="font-mono" style={{ color }}>{formatMoney(p.totalIn)}</span></div>
-              <div className="flex justify-between gap-5"><span className="text-cream/50">Out</span><span className="font-mono text-[#c47a7a]">{formatMoney(p.totalOut)}</span></div>
-              <div className="flex justify-between gap-5"><span className="text-cream/50">Net</span><span className="font-mono" style={{ color: p.net >= 0 ? color : "#c47a7a" }}>{p.net >= 0 ? "+" : ""}{formatMoney(p.net)}</span></div>
-              <div className="flex justify-between gap-5 border-t border-cream/15 pt-1">
-                <span className="text-cream/50">Position</span>
-                <span className="font-mono font-semibold" style={{ color: p.cumulative >= startingCash ? color : "#c47a7a" }}>{formatMoney(p.cumulative)}</span>
-              </div>
-              <div className="flex justify-between gap-5">
-                <span className="text-cream/40 text-[10px]">vs. savings</span>
-                <span className="font-mono text-[10px]" style={{ color: delta >= 0 ? color : "#c47a7a" }}>{delta >= 0 ? "+" : ""}{formatMoney(delta)}</span>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="min-w-[480px] cursor-crosshair"
-        onMouseMove={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          const idx = Math.floor(((e.clientX - r.left) * (W / r.width) - pL) / stepX);
-          setHoveredIdx(idx >= 0 && idx < projection.length ? idx : null);
-        }}
-        onMouseLeave={() => setHoveredIdx(null)}
-      >
-        <defs>
-          <linearGradient id={`pg-${person}`} x1="0" y1={pT} x2="0" y2={pT + iH} gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor={color} stopOpacity="0.55" />
-            <stop offset={startFrac * 0.85} stopColor={color} stopOpacity="0.14" />
-            <stop offset={startFrac} stopColor={color} stopOpacity="0.06" />
-            <stop offset="1" stopColor={color} stopOpacity="0.03" />
-          </linearGradient>
-          {/* Savings-zone fill (below the projection line, down to startingCash) */}
-          <linearGradient id={`sz-${person}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor={color} stopOpacity="0.18" />
-            <stop offset="1" stopColor={color} stopOpacity="0.06" />
-          </linearGradient>
-        </defs>
-
-        {/* Absolute-zero dashed line — only when 0 falls within the visible Y range */}
-        {zeroInView && (
-          <>
-            <line x1={pL} x2={W - pR} y1={zeroY} y2={zeroY} stroke="#3d2c2e" strokeWidth={1} strokeDasharray="4 4" opacity={0.3} />
-            <text x={pL - 6} y={zeroY + 3.5} textAnchor="end" fontSize={9} fill="#7a6f60" fontFamily="monospace">0</text>
-          </>
-        )}
-
-        {/* Savings baseline — always shown when savings > 0 */}
-        {startingCash > 0 && (
-          <>
-            <line x1={pL} x2={W - pR} y1={startY} y2={startY} stroke={color} strokeWidth={1.5} strokeDasharray="3 5" opacity={0.75} />
-            {/* Left label */}
-            <text x={pL - 6} y={startY + 3.5} textAnchor="end" fontSize={9} fill={color} fontFamily="monospace" fontWeight={600}>
-              {formatMoneyShort(startingCash)}
-            </text>
-            {/* Right label */}
-            <text x={W - pR - 4} y={startY - 5} textAnchor="end" fontSize={9} fill={color} fontFamily="ui-sans-serif" fontWeight={600} opacity={0.9}>
-              savings start
-            </text>
-          </>
-        )}
-
-        {/* Y axis max label */}
-        {(() => {
-          const y = yFor(rawMax);
-          return y >= pT + 6 && y <= pT + iH - 6
-            ? <text x={pL - 6} y={y + 3.5} textAnchor="end" fontSize={9} fill="#7a6f60" fontFamily="monospace">{formatMoneyShort(rawMax)}</text>
-            : null;
-        })()}
-        {/* Y axis min label (only if different from startingCash) */}
-        {rawMin < startingCash - 200 && (() => {
-          const y = yFor(rawMin);
-          return y >= pT + 6 && y <= pT + iH - 6
-            ? <text x={pL - 6} y={y + 3.5} textAnchor="end" fontSize={9} fill="#7a6f60" fontFamily="monospace">{formatMoneyShort(rawMin)}</text>
-            : null;
-        })()}
-
-        {/* Hover column */}
-        {hoveredIdx !== null && <rect x={pL + hoveredIdx * stepX} y={pT} width={stepX} height={iH} fill="#3d2c2e" opacity={0.04} />}
-
-        {/* Monthly net bars — drawn relative to startingCash baseline so they
-            represent the monthly surplus/deficit on top of the savings floor */}
-        {projection.map((p, i) => {
-          const h = Math.max(1, (Math.abs(p.net) / maxFlow) * iH * 0.28);
-          const y = p.net >= 0 ? startY - h : startY;
-          return (
-            <rect key={p.month} x={xFor(i) - barW / 2} y={y} width={barW} height={h}
-              fill={p.net >= 0 ? color : "#7a1f2b"} opacity={hoveredIdx === i ? 0.9 : 0.45} rx={1.5}
-            />
-          );
-        })}
-
-        {/* Area fill + cumulative line */}
-        <path d={areaPath} fill={`url(#pg-${person})`} />
-        <path d={linePath} fill="none" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
-
-        {/* Savings anchor dot at left edge */}
-        {startingCash > 0 && (
-          <>
-            <circle cx={pL} cy={startY} r={6} fill={color} stroke="#faf5e9" strokeWidth={2.5} />
-            <circle cx={pL} cy={startY} r={11} fill="none" stroke={color} strokeWidth={1} opacity={0.35} />
-          </>
-        )}
-
-        {/* Month dots */}
-        {projection.map((p, i) => (
-          <circle key={p.month} cx={xFor(i)} cy={yFor(p.cumulative)}
-            r={hoveredIdx === i ? 4.5 : 2.5}
-            fill={p.cumulative >= startingCash ? color : "#7a1f2b"} stroke="#faf5e9" strokeWidth={1}
-          />
-        ))}
-
-        {/* Crosshair */}
-        {hoveredIdx !== null && <line x1={xFor(hoveredIdx)} x2={xFor(hoveredIdx)} y1={pT} y2={pT + iH} stroke="#3d2c2e" strokeWidth={1} strokeDasharray="4 3" opacity={0.2} />}
-
-        {/* X axis labels */}
-        {projection.map((p, i) => {
-          if (i % labelEvery !== 0 && i !== projection.length - 1) return null;
-          return (
-            <text key={p.month} x={xFor(i)} y={H - 12} textAnchor="middle"
-              fontSize={9.5} fill={hoveredIdx === i ? "#3d2c2e" : "#7a6f60"} fontFamily="ui-sans-serif">
-              {monthShort(p.month)}
-            </text>
-          );
-        })}
-        {/* "start" label under the anchor */}
-        {startingCash > 0 && (
-          <text x={pL} y={H - 12} textAnchor="middle" fontSize={9} fill={color} fontFamily="ui-sans-serif" fontWeight={600} opacity={0.8}>
-            start
-          </text>
-        )}
-      </svg>
-    </div>
-  );
-}
-
-// ============================================================================
-// Personal view — Groom or Bride
-// ============================================================================
-
-function PersonView({
-  person, income, expenses, purchases, savings, settings,
-  personStartingCash, savingsPots,
-  onEditIncome, onEditExpense, onEditPurchase, onEditSaving, onAdd,
-}: {
-  person: "groom" | "bride";
-  income: LifeIncomeRow[];
-  expenses: LifeExpenseRow[];
-  purchases: LifePurchaseRow[];
-  savings: WeddingSavingsRow[];
-  settings: LifeSettingsRow;
-  personStartingCash: number;
-  savingsPots: { groom: number; bride: number; groomSaved: number; brideSaved: number; commonSaved: number };
-  onEditIncome: (i: LifeIncomeRow) => void;
-  onEditExpense: (e: LifeExpenseRow) => void;
-  onEditPurchase: (p: LifePurchaseRow) => void;
-  onEditSaving: (s: WeddingSavingsRow) => void;
-  onAdd: (type: "income" | "expense" | "purchase" | "saving") => void;
-}) {
-  const todayMonth = dateToMonth(new Date());
-  const [selectedMonth, setSelectedMonth] = useState(todayMonth);
-
-  const accentBorder = person === "groom" ? "border-l-sage" : "border-l-rose";
-  const accentText = person === "groom" ? "text-sage" : "text-rose";
-  const personName = person === "groom" ? "Groom" : "Bride";
-
-  // Month snapshot
-  const snap = useMemo(() => {
-    const m = selectedMonth;
-    const myIncome = income
-      .filter((i) => i.person === person && isActiveInMonth(i.start_month, i.end_month, m))
-      .reduce((a, i) => a + Number(i.amount), 0);
-    const commonIncome = income
-      .filter((i) => i.person === "both" && isActiveInMonth(i.start_month, i.end_month, m))
-      .reduce((a, i) => a + Number(i.amount) * 0.5, 0);
-    const myBills = expenses
-      .filter((e) => e.payer === person && isActiveInMonth(e.start_month, e.end_month, m))
-      .reduce((a, e) => a + Number(e.amount), 0);
-    const sharedBills = expenses
-      .filter((e) => e.payer === "both" && isActiveInMonth(e.start_month, e.end_month, m))
-      .reduce((a, e) => a + Number(e.amount) * personShare(e.payer, e.payer_groom_pct, person), 0);
-    const myPurch = purchases
-      .filter((p) => p.scheduled && p.target_month === m && p.payer === person)
-      .reduce((a, p) => a + Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)), 0);
-    const sharedPurch = purchases
-      .filter((p) => p.scheduled && p.target_month === m && p.payer === "both")
-      .reduce((a, p) => a + Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)) * personShare(p.payer, p.payer_groom_pct, person), 0);
-    const totalIn = myIncome + commonIncome;
-    const totalOut = myBills + sharedBills + myPurch + sharedPurch;
-    return { myIncome, commonIncome, myBills, sharedBills, myPurch, sharedPurch, totalIn, totalOut, net: totalIn - totalOut };
-  }, [selectedMonth, income, expenses, purchases, person]);
-
-  // Personal projection — starts from this person's allocated savings pot
-  const personProjection = useMemo((): PersonPoint[] => {
-    const months = monthsList(settings.start_month, settings.horizon_months);
-    let cumulative = personStartingCash;
-    return months.map((month) => {
-      const myInc = income
-        .filter((i) => i.person === person && isActiveInMonth(i.start_month, i.end_month, month))
-        .reduce((a, i) => a + Number(i.amount), 0);
-      const comInc = income
-        .filter((i) => i.person === "both" && isActiveInMonth(i.start_month, i.end_month, month))
-        .reduce((a, i) => a + Number(i.amount) * 0.5, 0);
-      const myExp = expenses
-        .filter((e) => e.payer === person && isActiveInMonth(e.start_month, e.end_month, month))
-        .reduce((a, e) => a + Number(e.amount), 0);
-      const shExp = expenses
-        .filter((e) => e.payer === "both" && isActiveInMonth(e.start_month, e.end_month, month))
-        .reduce((a, e) => a + Number(e.amount) * personShare(e.payer, e.payer_groom_pct, person), 0);
-      const myP = purchases
-        .filter((p) => p.scheduled && p.target_month === month)
-        .reduce((a, p) => a + Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)) * personShare(p.payer, p.payer_groom_pct, person), 0);
-      const totalIn = myInc + comInc;
-      const totalOut = myExp + shExp + myP;
-      const net = totalIn - totalOut;
-      cumulative += net;
-      return { month, totalIn, totalOut, net, cumulative };
-    });
-  }, [income, expenses, purchases, settings, person, personStartingCash]);
-
-  const savingsRate = snap.totalIn > 0 ? (snap.net / snap.totalIn) * 100 : 0;
-
-  return (
-    <div className="animate-in fade-in duration-200">
-      {/* Month selector */}
-      <div className="flex items-center gap-3 mb-6 flex-wrap">
-        <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Snapshot for</span>
-        <div className="w-52">
-          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-            <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {MONTH_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Flow summary — 3 cards */}
-      <div className="grid grid-cols-3 gap-4 mb-6 max-md:grid-cols-1">
-        {/* What's in */}
-        <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] p-5 shadow-soft`}>
-          <div className="text-[10px] uppercase tracking-[0.3em] text-ink-soft mb-3 font-medium">What&rsquo;s coming in</div>
-          <div className="font-serif text-[26px] mb-3"><em className={accentText}>+{formatMoney(snap.totalIn)}</em></div>
-          <div className="space-y-1.5 text-[12px]">
-            {snap.myIncome > 0 && (
-              <div className="flex justify-between items-center gap-2">
-                <span className="text-ink-soft truncate">Personal income</span>
-                <span className="font-mono text-sage shrink-0">+{formatMoney(snap.myIncome)}</span>
-              </div>
-            )}
-            {snap.commonIncome > 0 && (
-              <div className="flex justify-between items-center gap-2">
-                <span className="text-ink-soft flex items-center gap-1 truncate">
-                  <span className="text-gold text-[10px]">⇄</span> Common fund (50%)
-                </span>
-                <span className="font-mono text-gold shrink-0">+{formatMoney(snap.commonIncome)}</span>
-              </div>
-            )}
-            {snap.totalIn === 0 && <p className="italic text-ink-soft text-[11px]">No income tagged to {personName}.</p>}
-          </div>
-        </div>
-
-        {/* What's out */}
-        <div className="bg-paper border border-line border-l-[3px] border-l-burgundy rounded-[4px] p-5 shadow-soft">
-          <div className="text-[10px] uppercase tracking-[0.3em] text-ink-soft mb-3 font-medium">What&rsquo;s going out</div>
-          <div className="font-serif text-[26px] mb-3"><em className="text-burgundy">−{formatMoney(snap.totalOut)}</em></div>
-          <div className="space-y-1.5 text-[12px]">
-            {snap.myBills > 0 && (
-              <div className="flex justify-between items-center gap-2">
-                <span className="text-ink-soft truncate">Personal bills</span>
-                <span className="font-mono text-burgundy shrink-0">−{formatMoney(snap.myBills)}</span>
-              </div>
-            )}
-            {snap.sharedBills > 0 && (
-              <div className="flex justify-between items-center gap-2">
-                <span className="text-ink-soft flex items-center gap-1 truncate">
-                  <span className="text-gold text-[10px]">⇄</span> Share of joint bills
-                </span>
-                <span className="font-mono text-burgundy shrink-0">−{formatMoney(snap.sharedBills)}</span>
-              </div>
-            )}
-            {(snap.myPurch + snap.sharedPurch) > 0 && (
-              <div className="flex justify-between items-center gap-2">
-                <span className="text-ink-soft truncate">Purchases this month</span>
-                <span className="font-mono text-gold shrink-0">−{formatMoney(snap.myPurch + snap.sharedPurch)}</span>
-              </div>
-            )}
-            {snap.totalOut === 0 && <p className="italic text-ink-soft text-[11px]">No costs this month.</p>}
-          </div>
-        </div>
-
-        {/* Net */}
-        <div className={`bg-paper border border-line border-l-[3px] ${snap.net >= 0 ? accentBorder : "border-l-burgundy"} rounded-[4px] p-5 shadow-soft`}>
-          <div className="text-[10px] uppercase tracking-[0.3em] text-ink-soft mb-3 font-medium">Personal net</div>
-          <div className={`font-serif text-[26px] mb-3 ${snap.net < 0 ? "text-burgundy" : ""}`}>
-            <em>{snap.net >= 0 ? "+" : ""}{formatMoney(snap.net)}</em>
-          </div>
-          {snap.totalIn > 0 && (
-            <>
-              <div className="text-[12px] text-ink-soft mb-2">
-                {snap.net >= 0
-                  ? `${savingsRate.toFixed(0)}% savings rate`
-                  : `Deficit — spending more than earning`}
-              </div>
-              <div className="h-1.5 bg-line rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${snap.net >= 0 ? (person === "groom" ? "bg-sage" : "bg-rose") : "bg-burgundy"}`}
-                  style={{ width: `${Math.min(100, Math.abs(savingsRate))}%` }}
-                />
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Wealth journey — savings + chart + journey summary in one card */}
-      {(() => {
-        const personalSaved = savings.filter(s => s.contributor === person).reduce((a, s) => a + Number(s.amount), 0);
-        const halfCommon = savingsPots.commonSaved * 0.5;
-        const last = personProjection[personProjection.length - 1];
-        const endCash = last?.cumulative ?? personStartingCash;
-        const delta = endCash - personStartingCash;
-        const avgNet = personProjection.length > 0
-          ? personProjection.reduce((a, p) => a + p.net, 0) / personProjection.length
-          : 0;
-        const lowest = personProjection.length > 0
-          ? personProjection.reduce((m, p) => p.cumulative < m.cumulative ? p : m, personProjection[0])
-          : null;
-
-        return (
-          <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] shadow-soft mb-6`}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-line">
-              <div className="flex items-center gap-2">
-                <span className="text-[15px]">📈</span>
-                <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">{personName} · wealth journey</span>
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => onAdd("saving")}>+ Log savings</Button>
-            </div>
-
-            {/* Journey summary: Start → End + delta */}
-            <div className="grid grid-cols-3 gap-4 max-md:grid-cols-1 px-5 pt-5 pb-4">
-              <div>
-                <div className="text-[10px] uppercase tracking-[0.3em] text-ink-soft mb-1.5 font-medium">Starting wealth</div>
-                <div className={`font-serif text-[26px] ${accentText}`}><em>{formatMoney(personStartingCash)}</em></div>
-                <div className="text-[11px] text-ink-soft mt-1.5 leading-snug">
-                  {personalSaved > 0 && <span>{formatMoney(personalSaved)} personal</span>}
-                  {personalSaved > 0 && halfCommon > 0 && <span className="mx-1">·</span>}
-                  {halfCommon > 0 && <span className="text-gold">+{formatMoney(halfCommon)} ½ common</span>}
-                  {personalSaved === 0 && halfCommon === 0 && <span className="italic">No savings yet</span>}
-                </div>
-              </div>
-              <div className="flex items-center justify-center max-md:hidden">
-                <div className={`text-[28px] ${delta >= 0 ? accentText : "text-burgundy"} opacity-50`}>→</div>
-              </div>
-              <div className="md:text-right">
-                <div className="text-[10px] uppercase tracking-[0.3em] text-ink-soft mb-1.5 font-medium">After {settings.horizon_months} months</div>
-                <div className={`font-serif text-[26px] ${endCash >= 0 ? accentText : "text-burgundy"}`}>
-                  <em>{endCash >= 0 ? "" : "−"}{formatMoney(Math.abs(endCash))}</em>
-                </div>
-                <div className={`text-[11px] mt-1.5 ${delta >= 0 ? "text-sage" : "text-burgundy"} font-medium`}>
-                  {delta >= 0 ? "+" : "−"}{formatMoney(Math.abs(delta))} over horizon
-                </div>
-              </div>
-            </div>
-
-            {/* Chart */}
-            <div className="px-5 pb-3">
-              <PersonCashflowChart projection={personProjection} person={person} startingCash={personStartingCash} />
-            </div>
-
-            {/* Insight strip */}
-            <div className="grid grid-cols-3 gap-0 max-md:grid-cols-1 border-t border-line text-[12px]">
-              <div className="px-5 py-3 border-r border-line max-md:border-r-0 max-md:border-b">
-                <div className="text-[10px] uppercase tracking-[0.25em] text-ink-soft mb-1 font-medium">Avg monthly net</div>
-                <div className={`font-mono font-medium ${avgNet >= 0 ? accentText : "text-burgundy"}`}>
-                  {avgNet >= 0 ? "+" : ""}{formatMoney(avgNet)}
-                </div>
-              </div>
-              <div className="px-5 py-3 border-r border-line max-md:border-r-0 max-md:border-b">
-                <div className="text-[10px] uppercase tracking-[0.25em] text-ink-soft mb-1 font-medium">Lowest point</div>
-                <div className={`font-mono font-medium ${lowest && lowest.cumulative >= 0 ? accentText : "text-burgundy"}`}>
-                  {lowest ? formatMoney(lowest.cumulative) : "—"}
-                  {lowest && <span className="text-[10px] text-ink-soft ml-1.5 font-normal">{monthShort(lowest.month)}</span>}
-                </div>
-              </div>
-              <div className="px-5 py-3">
-                <div className="text-[10px] uppercase tracking-[0.25em] text-ink-soft mb-1 font-medium">End vs. start</div>
-                <div className={`font-mono font-medium ${delta >= 0 ? "text-sage" : "text-burgundy"}`}>
-                  {delta >= 0 ? "+" : ""}{((delta / Math.max(1, personStartingCash)) * 100).toFixed(0)}%
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Savings ledger — list of entries that feed the starting wealth */}
-      <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] shadow-soft mb-6`}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-line">
-          <div className="flex items-center gap-2">
-            <span className="text-[15px]">💰</span>
-            <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Savings ledger</span>
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => onAdd("saving")}>+ Log savings</Button>
-        </div>
-        {(() => {
-          const relevant = savings
-            .filter(s => s.contributor === person || s.contributor === "both")
-            .sort((a, b) => b.saved_on.localeCompare(a.saved_on));
-          if (relevant.length === 0) {
-            return <p className="px-5 py-6 text-[13px] italic text-ink-soft">No savings logged yet — click <strong>+ Log savings</strong> to start tracking.</p>;
-          }
-          return (
-            <ul className="divide-y divide-line">
-              {relevant.map((s) => (
-                <li key={s.id}
-                  className="flex items-center gap-3 px-5 py-3 hover:bg-cream/30 cursor-pointer"
-                  onClick={() => onEditSaving(s)}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-ink truncate text-[13px]">{s.source ?? "Savings"}</div>
-                    <div className="text-[11px] text-ink-soft truncate">
-                      {s.contributor === "both"
-                        ? <span className="text-gold">⇄ Common fund · your 50%</span>
-                        : <span className={accentText}>Personal</span>
-                      }
-                      {" · "}{formatDate(s.saved_on)}
-                    </div>
-                  </div>
-                  <div className={`font-mono font-medium text-[12px] shrink-0 ${s.contributor === "both" ? "text-gold" : accentText}`}>
-                    +{formatMoney(s.contributor === "both" ? Number(s.amount) * 0.5 : Number(s.amount))}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          );
-        })()}
-      </div>
-
-      {/* Filtered lists */}
-      <div className="grid grid-cols-3 gap-5 max-lg:grid-cols-1">
-        {/* Income */}
-        <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] shadow-soft flex flex-col`}>
-          <div className="flex items-center justify-between px-5 py-4 border-b border-line">
-            <div className="flex items-center gap-2">
-              <span className="text-[15px]">💼</span>
-              <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Income</span>
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => onAdd("income")}>+ Add</Button>
-          </div>
-          {income.length === 0 ? (
-            <p className="px-5 py-6 text-[13px] italic text-ink-soft">No income yet.</p>
-          ) : (
-            <ul className="divide-y divide-line">
-              {income.map((i) => {
-                const shareAmt = i.person === "both" ? Number(i.amount) * 0.5 : Number(i.amount);
-                return (
-                  <li key={i.id}
-                    className="flex items-center gap-3 px-5 py-3 hover:bg-cream/30 cursor-pointer"
-                    onClick={() => onEditIncome(i)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-ink truncate text-[13px]">{i.name}</div>
-                      <div className="text-[11px] text-ink-soft truncate">
-                        {i.person === "both"
-                          ? <span className="text-gold">⇄ Common fund · your 50%</span>
-                          : <span className={accentText}>Personal</span>
-                        }
-                        {i.start_month ? ` · from ${monthLabel(i.start_month)}` : ""}
-                        {i.end_month ? ` · until ${monthLabel(i.end_month)}` : ""}
-                      </div>
-                    </div>
-                    <div className="font-mono text-sage text-[12px] shrink-0">+{formatMoney(shareAmt)}/mo</div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
-        {/* Bills */}
-        <div className="bg-paper border border-line border-l-[3px] border-l-burgundy rounded-[4px] shadow-soft flex flex-col">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-line">
-            <div className="flex items-center gap-2">
-              <span className="text-[15px]">🔁</span>
-              <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Bills</span>
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => onAdd("expense")}>+ Add</Button>
-          </div>
-          {expenses.length === 0 ? (
-            <p className="px-5 py-6 text-[13px] italic text-ink-soft">No expenses yet.</p>
-          ) : (
-            <ul className="divide-y divide-line">
-              {expenses.map((e) => {
-                const share = personShare(e.payer, e.payer_groom_pct, person);
-                if (share === 0) return null;
-                return (
-                  <li key={e.id}
-                    className="flex items-center gap-3 px-5 py-3 hover:bg-cream/30 cursor-pointer"
-                    onClick={() => onEditExpense(e)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-ink truncate text-[13px]">{e.name}</div>
-                      <div className="text-[11px] text-ink-soft truncate">
-                        {e.payer === "both"
-                          ? <span className="text-gold">⇄ Shared · {Math.round(share * 100)}% your share</span>
-                          : <span>Personal bill</span>
-                        }
-                        {e.start_month ? ` · from ${monthLabel(e.start_month)}` : ""}
-                        {e.end_month ? ` · until ${monthLabel(e.end_month)}` : ""}
-                      </div>
-                    </div>
-                    <div className="font-mono text-burgundy text-[12px] shrink-0">−{formatMoney(Number(e.amount) * share)}/mo</div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
-        {/* Purchases */}
-        <div className="bg-paper border border-line border-l-[3px] border-l-gold rounded-[4px] shadow-soft flex flex-col">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-line">
-            <div className="flex items-center gap-2">
-              <span className="text-[15px]">🛋️</span>
-              <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">Purchases</span>
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => onAdd("purchase")}>+ Add</Button>
-          </div>
-          {purchases.length === 0 ? (
-            <p className="px-5 py-6 text-[13px] italic text-ink-soft">No purchases yet.</p>
-          ) : (
-            <ul className="divide-y divide-line">
-              {purchases.map((p) => {
-                const share = personShare(p.payer, p.payer_groom_pct, person);
-                if (share === 0) return null;
-                return (
-                  <li key={p.id}
-                    className={`flex items-center gap-3 px-5 py-3 hover:bg-cream/30 cursor-pointer ${!p.scheduled ? "opacity-45" : ""}`}
-                    onClick={() => onEditPurchase(p)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-ink truncate text-[13px]">{p.name}</div>
-                      <div className="text-[11px] text-ink-soft truncate">
-                        {monthLabel(p.target_month)}
-                        {p.payer === "both" ? <span className="text-gold"> · ⇄ shared {Math.round(share * 100)}%</span> : " · Personal"}
-                        {Number(p.already_paid ?? 0) > 0 && <span className="text-sage"> · {formatMoney(Number(p.already_paid))} paid</span>}
-                        {!p.scheduled && " · excluded"}
-                      </div>
-                    </div>
-                    <div className={`font-mono text-[12px] shrink-0 ${p.scheduled ? "text-gold" : "text-ink-soft line-through"}`}>
-                      −{formatMoney(Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)) * share)}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// Reusable visual atoms
-// ============================================================================
-
-function KPI({
-  label, value, meta, accent = "ink",
-}: {
-  label: string;
-  value: string;
-  meta?: string;
-  accent?: "burgundy" | "gold" | "sage" | "rose" | "ink";
-}) {
-  const accentColor: Record<string, string> = {
-    burgundy: "border-l-burgundy",
-    gold: "border-l-gold",
-    sage: "border-l-sage",
-    rose: "border-l-rose",
-    ink: "border-l-ink",
-  };
-  return (
-    <div className={`bg-paper border border-line border-l-[3px] ${accentColor[accent]} rounded-[4px] p-5 shadow-soft`}>
-      <div className="text-[10px] uppercase tracking-[0.3em] text-ink-soft mb-2 font-medium">{label}</div>
-      <div className="font-serif text-[22px] text-ink leading-tight"><em>{value}</em></div>
-      {meta && <div className="text-[12px] text-ink-soft mt-2 truncate">{meta}</div>}
-    </div>
-  );
-}
-
-function Legend({ swatch, label }: { swatch: string; label: string }) {
-  return (
-    <div className="flex items-center gap-2.5">
-      <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: swatch }} />
-      <span className="text-ink-soft uppercase tracking-[0.15em] text-[10px] font-medium">{label}</span>
-    </div>
-  );
-}
-
-// ============================================================================
-// View switcher — Household / Groom / Bride
-// ============================================================================
-
 type LifeView = "joint" | "groom" | "bride" | "calendar";
-
-function ViewSwitcher({ view, onChange }: { view: LifeView; onChange: (v: LifeView) => void }) {
-  const tabs: { value: LifeView; label: string; sub: string; activeClass: string }[] = [
-    { value: "joint", label: "Household", sub: "Combined finances", activeClass: "border-ink text-ink" },
-    { value: "groom", label: "Groom", sub: "Personal finances", activeClass: "border-sage text-sage" },
-    { value: "bride", label: "Bride", sub: "Personal finances", activeClass: "border-rose text-rose" },
-    { value: "calendar", label: "Calendar", sub: "Day-by-day", activeClass: "border-gold text-gold" },
-  ];
-  return (
-    <div className="flex gap-0 mb-8 border border-line rounded-[6px] overflow-hidden bg-cream-deep/40">
-      {tabs.map((t) => {
-        const active = view === t.value;
-        return (
-          <button
-            key={t.value}
-            type="button"
-            onClick={() => onChange(t.value)}
-            className={`flex-1 flex flex-col items-center py-3 px-4 transition-all border-b-[3px] ${
-              active
-                ? `bg-paper shadow-soft ${t.activeClass}`
-                : "border-transparent text-ink-soft hover:bg-cream/60 hover:text-ink"
-            }`}
-          >
-            <span className="text-[12px] font-semibold tracking-wide">{t.label}</span>
-            <span className="text-[10px] uppercase tracking-[0.15em] mt-0.5 opacity-70">{t.sub}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function PersonMonthly({
-  name, accent, income, expenses, purchases, person, startingCash,
-}: {
-  name: string;
-  accent: "sage" | "rose";
-  income: LifeIncomeRow[];
-  expenses: LifeExpenseRow[];
-  purchases: LifePurchaseRow[];
-  person: "groom" | "bride";
-  startingCash: number;
-}) {
-  const todayMonth = dateToMonth(new Date());
-  const [selectedMonth, setSelectedMonth] = useState(todayMonth);
-
-  const stats = useMemo(() => {
-    const m = selectedMonth;
-    const personIncome = income
-      .filter((i) => isActiveInMonth(i.start_month, i.end_month, m))
-      .reduce((a, i) => a + Number(i.amount) * (i.person === person ? 1 : i.person === "both" ? 0.5 : 0), 0);
-    const personExpenses = expenses
-      .filter((e) => isActiveInMonth(e.start_month, e.end_month, m))
-      .reduce((a, e) => a + Number(e.amount) * personShare(e.payer, e.payer_groom_pct, person), 0);
-    const personPurchases = purchases
-      .filter((p) => p.scheduled && p.target_month === m)
-      .reduce((a, p) => a + Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0)) * personShare(p.payer, p.payer_groom_pct, person), 0);
-    return {
-      income: personIncome,
-      expenses: personExpenses,
-      purchases: personPurchases,
-      net: personIncome - personExpenses - personPurchases,
-    };
-  }, [income, expenses, purchases, person, selectedMonth]);
-
-  const accentBorder = accent === "sage" ? "border-l-sage" : "border-l-rose";
-  const accentText = accent === "sage" ? "text-sage" : "text-rose";
-  const noData = stats.income === 0 && stats.expenses === 0 && stats.purchases === 0;
-
-  return (
-    <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] p-5 shadow-soft`}>
-      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-        <div className={`text-[11px] uppercase tracking-[0.3em] font-medium ${accentText}`}>{name} · monthly</div>
-        <div className="w-44 shrink-0">
-          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-            <SelectTrigger className="h-7 text-[11px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {MONTH_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-      {/* Starting pot */}
-      {startingCash > 0 && (
-        <div className="flex items-center justify-between mb-3 pb-3 border-b border-line">
-          <span className="text-[10px] uppercase tracking-[0.2em] text-ink-soft">Starting pot</span>
-          <span className={`font-mono text-[13px] font-medium ${accentText}`}>{formatMoney(startingCash)}</span>
-        </div>
-      )}
-
-      {noData ? (
-        <p className="text-[13px] italic text-ink-soft">Tag income or expenses to this person.</p>
-      ) : (
-        <>
-          <div className={`grid gap-3 ${stats.purchases > 0 ? "grid-cols-4" : "grid-cols-3"}`}>
-            <div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Income</div>
-              <div className="font-mono text-sage text-[15px]">+{formatMoney(stats.income)}</div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Bills</div>
-              <div className="font-mono text-burgundy text-[15px]">−{formatMoney(stats.expenses)}</div>
-            </div>
-            {stats.purchases > 0 && (
-              <div>
-                <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Purchases</div>
-                <div className="font-mono text-gold text-[15px]">−{formatMoney(stats.purchases)}</div>
-              </div>
-            )}
-            <div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Net</div>
-              <div className={`font-mono text-[15px] ${stats.net >= 0 ? accentText : "text-burgundy"}`}>
-                {stats.net >= 0 ? "+" : ""}{formatMoney(stats.net)}
-              </div>
-            </div>
-          </div>
-          {/* Mini bar showing income vs outgoings */}
-          {stats.income > 0 && (() => {
-            const total = Math.max(stats.income, stats.expenses + stats.purchases);
-            const incPct = Math.round((stats.income / total) * 100);
-            const expPct = Math.round(((stats.expenses + stats.purchases) / total) * 100);
-            return (
-              <div className="mt-3 flex gap-0.5 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-sage rounded-l-full transition-all" style={{ width: `${incPct}%` }} />
-                <div className="bg-burgundy rounded-r-full transition-all" style={{ width: `${expPct}%` }} />
-              </div>
-            );
-          })()}
-        </>
-      )}
-    </div>
-  );
-}
-
-type SectionItem = {
-  id: string;
-  primary: string;
-  secondary: string;
-  value: string;
-  valueClass: string;
-  onClick: () => void;
-  onDelete: () => void;
-  onToggle?: () => void;
-  toggled?: boolean;
-};
-
-function SectionCard({
-  title, emoji, emojiTitle, accent, empty, items, onAdd, totalCount, onViewAll,
-}: {
-  title: string;
-  emoji: string;
-  emojiTitle?: string;
-  accent: "sage" | "burgundy" | "gold";
-  empty: string;
-  items: SectionItem[];
-  onAdd: () => void;
-  totalCount?: number;
-  onViewAll?: () => void;
-}) {
-  const accentBorder = accent === "sage" ? "border-l-sage" : accent === "burgundy" ? "border-l-burgundy" : "border-l-gold";
-  const hasMore = totalCount !== undefined && totalCount > items.length;
-
-  return (
-    <div className={`bg-paper border border-line border-l-[3px] ${accentBorder} rounded-[4px] shadow-soft flex flex-col`}>
-      <div className="flex items-center justify-between px-5 py-4 border-b border-line">
-        <div className="flex items-center gap-2">
-          <span className="text-[16px]" title={emojiTitle}>{emoji}</span>
-          <span className="text-[11px] uppercase tracking-[0.3em] text-ink-soft font-medium">{title}</span>
-          {totalCount !== undefined && totalCount > 0 && (
-            <span className="text-[10px] bg-cream-deep text-ink-soft rounded-full px-1.5 py-0.5 font-mono">{totalCount}</span>
-          )}
-        </div>
-        <Button variant="ghost" size="sm" onClick={onAdd}>+ Add</Button>
-      </div>
-
-      {items.length === 0 ? (
-        <div className="px-5 py-8 text-center">
-          <p className="text-[13px] italic text-ink-soft mb-4">{empty}</p>
-          <Button onClick={onAdd}>+ Add first</Button>
-        </div>
-      ) : (
-        <>
-          <ul className="divide-y divide-line">
-            {items.map((it) => (
-              <li key={it.id} className="group flex items-center gap-3 px-5 py-3 hover:bg-cream/30">
-                {it.onToggle && (
-                  <button
-                    type="button"
-                    onClick={it.onToggle}
-                    className={`w-3.5 h-3.5 rounded-sm border shrink-0 transition-colors ${it.toggled ? "bg-gold border-gold" : "bg-transparent border-line"}`}
-                    aria-label={it.toggled ? "Disable" : "Enable"}
-                    title={it.toggled ? "Included in projection — click to exclude" : "Excluded from projection — click to include"}
-                  />
-                )}
-                <button
-                  type="button"
-                  onClick={it.onClick}
-                  className="flex-1 min-w-0 text-left"
-                >
-                  <div className="font-medium text-ink truncate">{it.primary}</div>
-                  <div className="text-[11px] text-ink-soft truncate">{it.secondary}</div>
-                </button>
-                <div className={`font-mono text-[13px] shrink-0 ${it.valueClass}`}>{it.value}</div>
-                <button
-                  type="button"
-                  onClick={it.onDelete}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity text-ink-soft hover:text-burgundy text-[18px] shrink-0"
-                  aria-label="Delete"
-                >
-                  ×
-                </button>
-              </li>
-            ))}
-          </ul>
-          {hasMore && onViewAll && (
-            <button
-              type="button"
-              onClick={onViewAll}
-              className="flex items-center justify-center gap-1.5 px-5 py-2.5 border-t border-line text-[11px] text-ink-soft hover:text-ink hover:bg-cream/40 transition-colors"
-            >
-              Show all {totalCount} items
-              <span className="text-[10px] opacity-60">↗</span>
-            </button>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
 
 // ============================================================================
 // Field helpers
