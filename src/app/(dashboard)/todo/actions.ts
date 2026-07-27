@@ -63,12 +63,16 @@ export async function updateTodo(id: string, _prev: unknown, form: FormData) {
   return { ok: true as const };
 }
 
-export async function toggleTodo(id: string, done: boolean) {
+export async function toggleTodo(id: string, done: boolean): Promise<{ error?: string }> {
   const supabase = createSupabaseServerClient();
-  await supabase.from("todos").update({ done } as never).eq("id", id);
+  const { error } = await supabase.from("todos").update({ done } as never).eq("id", id);
+  if (error) return { error: error.message };
+  return {};
 }
 
-export async function deleteTodo(id: string) {
+export async function deleteTodo(id: string): Promise<{ error?: string }> {
   const supabase = createSupabaseServerClient();
-  await supabase.from("todos").delete().eq("id", id);
+  const { error } = await supabase.from("todos").delete().eq("id", id);
+  if (error) return { error: error.message };
+  return {};
 }

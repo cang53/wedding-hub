@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ActionError } from "@/components/action-error";
 import { createTodo, deleteTodo, toggleTodo, updateTodo } from "./actions";
 
 const PRIORITY_ORDER: Record<TodoPriority, number> = { high: 0, medium: 1, low: 2 };
@@ -104,22 +105,33 @@ export function TodoClient({ initialTodos }: Props) {
   // ---- Actions --------------------------------------------------------------
 
   const [, startTransition] = useTransition();
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const handleToggle = (todo: TodoRow) => {
     // Optimistic flip — realtime will reconfirm with the same value.
+    const rollback = todos;
     setTodos((prev) =>
       prev.map((t) => (t.id === todo.id ? { ...t, done: !t.done } : t))
     );
-    startTransition(() => {
-      toggleTodo(todo.id, !todo.done);
+    startTransition(async () => {
+      const { error } = await toggleTodo(todo.id, !todo.done);
+      if (error) {
+        setTodos(rollback);
+        setActionError(error);
+      }
     });
   };
 
   const handleDelete = (todo: TodoRow) => {
     if (!confirm(`Delete "${todo.text}"?`)) return;
+    const rollback = todos;
     setTodos((prev) => prev.filter((t) => t.id !== todo.id));
-    startTransition(() => {
-      deleteTodo(todo.id);
+    startTransition(async () => {
+      const { error } = await deleteTodo(todo.id);
+      if (error) {
+        setTodos(rollback);
+        setActionError(error);
+      }
     });
   };
 
@@ -145,6 +157,8 @@ export function TodoClient({ initialTodos }: Props) {
         </div>
         <Button onClick={handleNew}>+ New task</Button>
       </div>
+
+      <ActionError message={actionError} onDismiss={() => setActionError(null)} />
 
       {/* Toolbar */}
       <div className="flex flex-wrap gap-3 items-center mb-6">

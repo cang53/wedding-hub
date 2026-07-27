@@ -49,7 +49,9 @@ export async function updateWeddingDayEvent(id: string, _prev: unknown, form: Fo
   return { ok: true as const, data };
 }
 
-export async function deleteWeddingDayEvent(id: string) {
+export async function deleteWeddingDayEvent(id: string): Promise<{ error?: string }> {
   const supabase = createSupabaseServerClient();
-  await supabase.from("wedding_day_events").delete().eq("id", id);
+  const { error } = await supabase.from("wedding_day_events").delete().eq("id", id);
+  if (error) return { error: error.message };
+  return {};
 }

@@ -12,6 +12,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { ActionError } from "@/components/action-error";
 import { createGuest, deleteGuest, updateGuest } from "./actions";
 
 const SIDE_OPTIONS: { value: GuestSide; label: string }[] = [
@@ -69,6 +70,7 @@ export function GuestsClient({ initialGuests }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<GuestRow | null>(null);
   const [, startTransition] = useTransition();
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -120,8 +122,15 @@ export function GuestsClient({ initialGuests }: Props) {
 
   const handleDelete = (g: GuestRow) => {
     if (!confirm(`Delete "${g.name}"?`)) return;
+    const rollback = guests;
     setGuests((prev) => prev.filter((x) => x.id !== g.id));
-    startTransition(() => { deleteGuest(g.id); });
+    startTransition(async () => {
+      const { error } = await deleteGuest(g.id);
+      if (error) {
+        setGuests(rollback);
+        setActionError(error);
+      }
+    });
   };
 
   return (
@@ -135,6 +144,8 @@ export function GuestsClient({ initialGuests }: Props) {
         </div>
         <Button onClick={() => { setEditing(null); setDialogOpen(true); }}>+ New guest</Button>
       </div>
+
+      <ActionError message={actionError} onDismiss={() => setActionError(null)} />
 
       {/* Stats row */}
       <div className="guest-stats mb-6">

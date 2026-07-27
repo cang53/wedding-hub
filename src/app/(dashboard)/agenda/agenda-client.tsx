@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ActionError } from "@/components/action-error";
 import {
   createAgendaEvent,
   deleteAgendaEvent,
@@ -101,12 +102,18 @@ export function AgendaClient({ initialEvents }: Props) {
   // ---- Actions --------------------------------------------------------------
 
   const [, startTransition] = useTransition();
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const handleDelete = (event: AgendaRow) => {
     if (!confirm(`Delete "${event.title}"?`)) return;
+    const rollback = events;
     setEvents((prev) => prev.filter((e) => e.id !== event.id));
-    startTransition(() => {
-      deleteAgendaEvent(event.id);
+    startTransition(async () => {
+      const { error } = await deleteAgendaEvent(event.id);
+      if (error) {
+        setEvents(rollback);
+        setActionError(error);
+      }
     });
   };
 
@@ -134,6 +141,8 @@ export function AgendaClient({ initialEvents }: Props) {
         </div>
         <Button onClick={handleNew}>+ New event</Button>
       </div>
+
+      <ActionError message={actionError} onDismiss={() => setActionError(null)} />
 
       {/* List */}
       {sorted.length === 0 ? (

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { formatMoney, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { ActionError } from "@/components/action-error";
 import { PlannerProvider, usePlanner } from "./use-planner";
 import { ScenarioDetail } from "./scenario-detail";
 import { CompareView } from "./compare-view";
@@ -27,7 +28,7 @@ export function HoneymoonClient({
 }
 
 function PlannerShell() {
-  const { scenarios, addScenario, duplicate } = usePlanner();
+  const { scenarios, addScenario, duplicate, error, dismissError } = usePlanner();
   const [openId, setOpenId] = useState<string | null>(null);
   const [comparing, setComparing] = useState(false);
 
@@ -57,6 +58,8 @@ function PlannerShell() {
           <Button onClick={handleNew}>+ New scenario</Button>
         </div>
       </div>
+
+      <ActionError message={error} onDismiss={dismissError} />
 
       {scenarios.length === 0 ? (
         <EmptyState onNew={handleNew} />

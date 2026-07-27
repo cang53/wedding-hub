@@ -18,6 +18,7 @@ import {
 import { WEDDING_DATE } from "@/lib/config";
 import { useWeddingRole, type WeddingRole } from "@/lib/use-wedding-role";
 import { daysUntil } from "@/lib/utils";
+import { ActionError } from "@/components/action-error";
 import { createWeddingDayEvent, deleteWeddingDayEvent, updateWeddingDayEvent } from "./actions";
 
 // ============================================================================
@@ -177,6 +178,7 @@ export function WeddingDayClient({ initialItems }: Props) {
   const [editing, setEditing] = useState<WeddingDayEventRow | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("all");
   const [, startTransition] = useTransition();
+  const [actionError, setActionError] = useState<string | null>(null);
   const [now, setNow] = useState<Date | null>(null);
 
   // Default the view to whichever role was picked on the landing page. The
@@ -298,8 +300,15 @@ export function WeddingDayClient({ initialItems }: Props) {
 
   const handleDelete = (item: WeddingDayEventRow) => {
     if (!confirm(`Delete "${item.title}"?`)) return;
+    const rollback = items;
     setItems((prev) => prev.filter((i) => i.id !== item.id));
-    startTransition(() => { deleteWeddingDayEvent(item.id); });
+    startTransition(async () => {
+      const { error } = await deleteWeddingDayEvent(item.id);
+      if (error) {
+        setItems(rollback);
+        setActionError(error);
+      }
+    });
   };
 
   const handleApplyTemplate = async (template: Template) => {
@@ -347,6 +356,8 @@ export function WeddingDayClient({ initialItems }: Props) {
           <Button onClick={handleAddEvent}>+ Add event</Button>
         )}
       </div>
+
+      <ActionError message={actionError} onDismiss={() => setActionError(null)} />
 
       {/* View mode tabs (bride/groom/both) */}
       {items.length > 0 && (

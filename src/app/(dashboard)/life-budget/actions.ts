@@ -261,8 +261,19 @@ async function persistOptions(
   chosenIndex: number,
 ): Promise<{ selectedId: string | null; amount: number | null; rows: LifePurchaseOptionRow[] }> {
   // Clear the FK first, then wipe the old options so we start from a clean slate.
-  await supabase.from("life_purchases").update({ selected_option_id: null } as never).eq("id", purchaseId);
-  await supabase.from("life_purchase_options").delete().eq("purchase_id", purchaseId);
+  // Both must succeed before the re-insert below, otherwise we'd end up with
+  // the old options duplicated alongside the new ones.
+  const { error: clearErr } = await supabase
+    .from("life_purchases")
+    .update({ selected_option_id: null } as never)
+    .eq("id", purchaseId);
+  if (clearErr) throw new Error(clearErr.message);
+
+  const { error: wipeErr } = await supabase
+    .from("life_purchase_options")
+    .delete()
+    .eq("purchase_id", purchaseId);
+  if (wipeErr) throw new Error(wipeErr.message);
 
   if (options.length === 0) return { selectedId: null, amount: null, rows: [] };
 

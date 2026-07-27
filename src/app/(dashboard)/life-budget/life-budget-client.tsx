@@ -387,8 +387,12 @@ export function LifeBudgetClient({
   };
   const handleToggleScheduled = (item: LifePurchaseRow) => {
     const next = !item.scheduled;
-    setPurchases((prev) => prev.map((p) => (p.id === item.id ? { ...p, scheduled: next } : p)));
-    startTransition(() => { togglePurchaseScheduled(item.id, next); });
+    const prev = purchases;
+    setPurchases((p) => p.map((x) => (x.id === item.id ? { ...x, scheduled: next } : x)));
+    startTransition(async () => {
+      const res = await togglePurchaseScheduled(item.id, next);
+      if (res?.error) { setPurchases(prev); setErrorBanner(res.error); }
+    });
   };
   const handleDeleteSaving = (item: WeddingSavingsRow) => {
     setErrorBanner(null);
@@ -400,7 +404,8 @@ export function LifeBudgetClient({
         setSavings((p) => p.filter((i) => i.id !== item.id));
         setConfirmState((s) => ({ ...s, open: false }));
         startTransition(async () => {
-          await deleteSavingEntry(item.id);
+          const res = await deleteSavingEntry(item.id);
+          if (res?.error) { setSavings(prev); setErrorBanner(res.error); }
         });
       },
     });
@@ -408,12 +413,21 @@ export function LifeBudgetClient({
 
   // ---- Assign day of month (calendar drag-and-drop) -----------------------
   const handleAssignDay = (type: "income" | "expense" | "purchase", id: string, day: number | null) => {
+    const prevIncome = income;
+    const prevExpenses = expenses;
+    const prevPurchases = purchases;
     if (type === "income") setIncome((prev) => prev.map((i) => i.id === id ? { ...i, day_of_month: day } : i));
     else if (type === "expense") setExpenses((prev) => prev.map((e) => e.id === id ? { ...e, day_of_month: day } : e));
     else setPurchases((prev) => prev.map((p) => p.id === id ? { ...p, day_of_month: day } : p));
-    startTransition(() => {
+    startTransition(async () => {
       const table = type === "income" ? "life_income" : type === "expense" ? "life_expenses" : "life_purchases";
-      assignDayOfMonth(table, id, day);
+      const res = await assignDayOfMonth(table, id, day);
+      if (res?.error) {
+        if (type === "income") setIncome(prevIncome);
+        else if (type === "expense") setExpenses(prevExpenses);
+        else setPurchases(prevPurchases);
+        setErrorBanner(res.error);
+      }
     });
   };
 

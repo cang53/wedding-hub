@@ -13,6 +13,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { ActionError } from "@/components/action-error";
 import { createApartment, deleteApartment, updateApartment } from "./actions";
 
 const STATUS_OPTIONS: { value: ApartmentStatus; label: string }[] = [
@@ -31,6 +32,7 @@ export function ApartmentsClient({ initialItems }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ApartmentRow | null>(null);
   const [, startTransition] = useTransition();
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -56,8 +58,15 @@ export function ApartmentsClient({ initialItems }: Props) {
 
   const handleDelete = (item: ApartmentRow) => {
     if (!confirm(`Delete "${item.title}"?`)) return;
+    const rollback = items;
     setItems((prev) => prev.filter((i) => i.id !== item.id));
-    startTransition(() => { deleteApartment(item.id); });
+    startTransition(async () => {
+      const { error } = await deleteApartment(item.id);
+      if (error) {
+        setItems(rollback);
+        setActionError(error);
+      }
+    });
   };
 
   return (
@@ -71,6 +80,8 @@ export function ApartmentsClient({ initialItems }: Props) {
         </div>
         <Button onClick={() => { setEditing(null); setDialogOpen(true); }}>+ New listing</Button>
       </div>
+
+      <ActionError message={actionError} onDismiss={() => setActionError(null)} />
 
       {items.length === 0 ? (
         <EmptyState />
