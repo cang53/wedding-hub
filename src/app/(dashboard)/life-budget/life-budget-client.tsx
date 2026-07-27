@@ -868,11 +868,6 @@ function payerLabel(payer: ExpensePayer, pct: number | null): string {
   return payer === "groom" ? "Groom" : "Bride";
 }
 
-function formatMoneyShort(n: number): string {
-  if (Math.abs(n) >= 1000) return `€${(n / 1000).toFixed(1)}k`;
-  return `€${Math.round(n)}`;
-}
-
 // Shared shape for a month's projected cash position (household or per-person).
 type PersonPoint = { month: string; net: number; cumulative: number; totalIn: number; totalOut: number };
 
@@ -2566,143 +2561,97 @@ function ExpandedSavingsDialog({
 type CalendarPersonFilter = "all" | "groom" | "bride";
 type CalendarDragItem = { id: string; type: "income" | "expense" | "purchase" };
 type CalEv = { id: string; type: "income" | "expense" | "purchase"; name: string; amount: number; day: number | null };
-type TLNode = { day: number; events: (CalEv & { day: number })[]; balanceBefore: number; balanceAfter: number };
 
 const EVENT_COLOR: Record<CalEv["type"], string> = {
   income: "var(--green)", expense: "var(--fg2)", purchase: "var(--amber)",
 };
 
 // ============================================================================
-// CashTimeline — horizontal flow of events + running balance
+// CashChart — a smooth line + area chart of the day-by-day cash trajectory,
+// with clickable markers on days that carry a scheduled item. Replaces the
+// old boxed-card timeline with something closer to a real finance app.
 // ============================================================================
 
-function CashTimeline({
-  nodes, unscheduledEvents, cashAtMonthStart, daysInMonth, currentMonth, selectedDay, onSelectDay,
+function CashChart({
+  dailyBalances, cashAtMonthStart, daysInMonth, eventDays, selectedDay, onSelectDay, todayDay,
 }: {
-  nodes: TLNode[];
-  unscheduledEvents: CalEv[];
+  dailyBalances: number[];
   cashAtMonthStart: number;
   daysInMonth: number;
-  currentMonth: string;
+  eventDays: Set<number>;
   selectedDay: number | null;
   onSelectDay: (day: number | null) => void;
+  todayDay: number | null;
 }) {
-  const scheduledEnd = nodes.length > 0 ? nodes[nodes.length - 1].balanceAfter : cashAtMonthStart;
-  const unschedNet = unscheduledEvents.reduce((a, e) => a + (e.type === "income" ? e.amount : -e.amount), 0);
-  const finalEnd = scheduledEnd + unschedNet;
-  const [cY, cM] = currentMonth.split("-").map(Number);
+  const W = 800;
+  const H = 160;
+  const PAD_Y = 18;
 
-  const balColor = (bal: number) => (bal >= 0 ? "var(--green)" : "var(--red)");
+  const values = [cashAtMonthStart, ...Array.from({ length: daysInMonth }, (_, i) => dailyBalances[i + 1])];
+  const minV = Math.min(0, ...values);
+  const maxV = Math.max(0, ...values);
+  const range = Math.max(1, maxV - minV);
 
-  const Connector = ({ fromBal, days }: { fromBal: number; days: number }) => (
-    <div className="relative flex min-w-[28px] flex-col items-center justify-center" style={{ flexGrow: Math.max(1, days), flexBasis: 0 }}>
-      <div className="mb-1.5 h-3 text-center text-[9px] leading-none text-[var(--fg3)]">{days > 1 ? `${days}d` : ""}</div>
-      <div className="h-px w-full bg-[var(--sep)]" />
-      <div className="mt-1.5 text-[9px] tabular-nums" style={{ color: balColor(fromBal) }}>{formatMoneyShort(fromBal)}</div>
-    </div>
-  );
+  const xAt = (i: number) => (i / daysInMonth) * W;
+  const yAt = (v: number) => PAD_Y + (1 - (v - minV) / range) * (H - PAD_Y * 2);
+  const zeroY = yAt(0);
+  const showZeroLine = minV < 0 && maxV > 0;
 
-  const Cap = ({ label, amount, delta }: { label: string; amount: number; delta?: number }) => (
-    <div className="flex shrink-0 flex-col items-center gap-1">
-      <div className="text-[9px] tracking-[0.15em] text-[var(--fg3)] uppercase">{label}</div>
-      <div className="flex h-[52px] w-[52px] items-center justify-center rounded-full border-[1.5px]" style={{ borderColor: balColor(amount) }}>
-        <div className="text-center text-[9px] leading-tight font-bold tabular-nums" style={{ color: balColor(amount) }}>
-          {formatMoneyShort(amount)}
-        </div>
-      </div>
-      {delta !== undefined && (
-        <div className="text-[9px] font-medium" style={{ color: delta >= 0 ? "var(--green)" : "var(--red)" }}>
-          {delta >= 0 ? "▲" : "▼"} {formatMoneyShort(Math.abs(delta))}
-        </div>
-      )}
-    </div>
-  );
+  const linePoints = values.map((v, i) => `${xAt(i)},${yAt(v)}`).join(" ");
+  const areaPath = `M ${xAt(0)},${zeroY} L ${values.map((v, i) => `${xAt(i)},${yAt(v)}`).join(" L ")} L ${xAt(values.length - 1)},${zeroY} Z`;
+
+  const endValue = values[values.length - 1];
+  const delta = endValue - cashAtMonthStart;
 
   return (
-    <div className="flex flex-wrap items-center gap-y-3 px-1 py-2">
-      <Cap label="Start" amount={cashAtMonthStart} />
+    <div>
+      <div className="mb-2 flex items-baseline justify-between px-1">
+        <div>
+          <div className="text-[11px] tracking-[0.1em] text-[var(--fg3)] uppercase">Start</div>
+          <div className="text-[15px] tabular-nums">{formatMoney(cashAtMonthStart)}</div>
+        </div>
+        <div className="text-right">
+          <div className="text-[11px] tracking-[0.1em] text-[var(--fg3)] uppercase">Projected end</div>
+          <div className="flex items-baseline justify-end gap-2">
+            <span className="text-[19px] font-semibold tabular-nums" style={{ color: endValue >= 0 ? "var(--fg)" : "var(--red)" }}>
+              {formatMoney(endValue)}
+            </span>
+            <span className="text-[12px] tabular-nums" style={{ color: delta >= 0 ? "var(--green)" : "var(--red)" }}>
+              {delta >= 0 ? "▲" : "▼"} {formatMoney(Math.abs(delta))}
+            </span>
+          </div>
+        </div>
+      </div>
 
-      {nodes.length === 0 && !unscheduledEvents.length ? (
-        <div className="mx-6 flex-1 text-[13px] text-[var(--fg3)]">Pin events to days on the calendar to see the flow here.</div>
-      ) : (
-        <>
-          {nodes.map((node, idx) => {
-            const prevDay = idx === 0 ? 0 : nodes[idx - 1].day;
-            const isSelected = selectedDay === node.day;
-            const dayLabel = new Date(cY, cM - 1, node.day)
-              .toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
-
-            return (
-              <div key={node.day} className="contents">
-                <Connector fromBal={node.balanceBefore} days={node.day - prevDay} />
-                <button
-                  type="button"
-                  onClick={() => onSelectDay(isSelected ? null : node.day)}
-                  className="min-w-[112px] max-w-[160px] shrink-0 rounded-[10px] p-2.5 text-left transition-[box-shadow]"
-                  style={{ background: isSelected ? "var(--accent)" : "var(--card)", boxShadow: isSelected ? "0 4px 14px rgba(0,0,0,.2)" : "none" }}
-                >
-                  <div className="mb-2 text-[10px]" style={{ color: isSelected ? "rgba(255,255,255,.7)" : "var(--fg3)" }}>{dayLabel}</div>
-                  <div className="space-y-1.5">
-                    {node.events.map((ev) => (
-                      <div key={ev.id} className="flex items-start justify-between gap-1.5">
-                        <div className="min-w-0 truncate text-[10px] leading-tight" style={{ color: isSelected ? "rgba(255,255,255,.9)" : "var(--fg)" }}>
-                          {ev.name}
-                        </div>
-                        <div
-                          className="shrink-0 text-[10px] font-medium tabular-nums"
-                          style={{ color: isSelected ? "#fff" : EVENT_COLOR[ev.type] }}
-                        >
-                          {ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-2 flex items-center justify-between gap-2 border-t pt-1.5" style={{ borderColor: isSelected ? "rgba(255,255,255,.25)" : "var(--sep)" }}>
-                    <span className="text-[9px]" style={{ color: isSelected ? "rgba(255,255,255,.7)" : "var(--fg3)" }}>After</span>
-                    <span className="text-[11px] font-bold tabular-nums" style={{ color: isSelected ? "#fff" : balColor(node.balanceAfter) }}>
-                      {formatMoneyShort(node.balanceAfter)}
-                    </span>
-                  </div>
-                </button>
-              </div>
-            );
-          })}
-
-          {/* Connector from last node to end */}
-          <Connector
-            fromBal={nodes.length > 0 ? nodes[nodes.length - 1].balanceAfter : cashAtMonthStart}
-            days={daysInMonth - (nodes.length > 0 ? nodes[nodes.length - 1].day : 0)}
-          />
-
-          {/* Unscheduled block */}
-          {unscheduledEvents.length > 0 && (
-            <>
-              <div className="flex w-6 shrink-0 items-center"><div className="w-full border-t border-dashed border-[var(--sep)]" /></div>
-              <div className="min-w-[130px] shrink-0 rounded-[10px] border border-dashed border-[var(--sep)] p-2.5">
-                <div className="mb-1.5 text-[10px] text-[var(--fg3)]">Unscheduled ({unscheduledEvents.length})</div>
-                {unscheduledEvents.slice(0, 4).map((ev) => (
-                  <div key={ev.id} className="mb-0.5 flex items-center gap-1.5">
-                    <span className="shrink-0 text-[9px] font-medium tabular-nums" style={{ color: EVENT_COLOR[ev.type] }}>
-                      {ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}
-                    </span>
-                    <span className="truncate text-[9px] text-[var(--fg2)]">{ev.name}</span>
-                  </div>
-                ))}
-                {unscheduledEvents.length > 4 && <div className="text-[9px] text-[var(--fg3)]">+{unscheduledEvents.length - 4} more</div>}
-                <div
-                  className="mt-1.5 border-t border-dashed border-[var(--sep)] pt-1 text-[9px] font-medium tabular-nums"
-                  style={{ color: unschedNet >= 0 ? "var(--green)" : "var(--red)" }}
-                >
-                  Net: {unschedNet >= 0 ? "+" : "−"}{formatMoney(Math.abs(unschedNet))}
-                </div>
-              </div>
-              <div className="flex w-4 shrink-0 items-center"><div className="w-full border-t border-dashed border-[var(--sep)]" /></div>
-            </>
-          )}
-        </>
-      )}
-
-      <Cap label="End" amount={finalEnd} delta={finalEnd - cashAtMonthStart} />
+      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full" style={{ height: 150 }} preserveAspectRatio="none">
+        {showZeroLine && (
+          <line x1={0} y1={zeroY} x2={W} y2={zeroY} stroke="var(--sep)" strokeDasharray="4 4" strokeWidth={1} />
+        )}
+        <path d={areaPath} fill="var(--fill)" stroke="none" />
+        <polyline points={linePoints} fill="none" stroke="var(--accent)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
+          const hasEvent = eventDays.has(day);
+          const isToday = day === todayDay;
+          const isSelected = selectedDay === day;
+          if (!hasEvent && !isToday && !isSelected) return null;
+          const cx = xAt(day);
+          const cy = yAt(dailyBalances[day]);
+          const dotColor = dailyBalances[day] >= 0 ? "var(--green)" : "var(--red)";
+          return (
+            <g key={day} onClick={() => onSelectDay(isSelected ? null : day)} style={{ cursor: "pointer" }}>
+              <circle cx={cx} cy={cy} r={14} fill="rgba(0,0,0,0.001)" style={{ pointerEvents: "all" }} />
+              {isToday && <circle cx={cx} cy={cy} r={9} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
+              <circle
+                cx={cx} cy={cy}
+                r={isSelected ? 6 : hasEvent ? 4 : 2.5}
+                fill={hasEvent || isSelected ? dotColor : "var(--fg3)"}
+                stroke="var(--card)"
+                strokeWidth={isSelected ? 2 : 1.5}
+              />
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }
@@ -2727,6 +2676,9 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [personFilter, setPersonFilter] = useState<CalendarPersonFilter>("all");
   const [dragOverDay, setDragOverDay] = useState<number | null>(null);
+  // Tap-to-place fallback for touch devices, where native HTML5 drag-and-drop
+  // doesn't work: tap an unscheduled item to arm it, then tap a day to place it.
+  const [armedEventId, setArmedEventId] = useState<string | null>(null);
 
   const maxMonth = useMemo(() => {
     if (projection.length > 0) return projection[projection.length - 1].month;
@@ -2742,6 +2694,7 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
     if (next < settings.start_month || next > maxMonth) return;
     setCurrentMonth(next);
     setSelectedDay(null);
+    setArmedEventId(null);
   };
 
   // Filtered source arrays by person
@@ -2788,6 +2741,7 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
 
   const scheduledEvents = useMemo(() => allEvents.filter((e) => e.day !== null) as (CalEv & { day: number })[], [allEvents]);
   const unscheduledEvents = useMemo(() => allEvents.filter((e) => e.day === null), [allEvents]);
+  const eventDays = useMemo(() => new Set(scheduledEvents.map((e) => e.day)), [scheduledEvents]);
 
   const cashAtMonthStart = useMemo(() => {
     // Base savings pot depends on the active person filter: the full combined
@@ -2827,23 +2781,6 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
     return cash;
   }, [currentMonth, filteredIncome, filteredExpenses, filteredPurchases, settings, startingCash, groomStartingCash, brideStartingCash, personFilter]);
 
-  const timelineNodes = useMemo((): TLNode[] => {
-    const map = new Map<number, (CalEv & { day: number })[]>();
-    scheduledEvents.forEach((ev) => {
-      const arr = map.get(ev.day) ?? [];
-      arr.push(ev);
-      map.set(ev.day, arr);
-    });
-    const days = Array.from(map.keys()).sort((a, b) => a - b);
-    let balance = cashAtMonthStart;
-    return days.map((day) => {
-      const events = map.get(day)!;
-      const balanceBefore = balance;
-      events.forEach((ev) => { balance += ev.type === "income" ? ev.amount : -ev.amount; });
-      return { day, events, balanceBefore, balanceAfter: balance };
-    });
-  }, [scheduledEvents, cashAtMonthStart]);
-
   const [y, m] = currentMonth.split("-").map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
 
@@ -2875,6 +2812,17 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
   const todayDay = todayStr === currentMonth ? new Date().getDate() : null;
 
   const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+  const armedEvent = armedEventId ? unscheduledEvents.find((e) => e.id === armedEventId) ?? null : null;
+
+  const handleDayClick = (day: number) => {
+    if (armedEvent) {
+      onAssignDay(armedEvent.type, armedEvent.id, day);
+      setArmedEventId(null);
+      return;
+    }
+    setSelectedDay((prev) => (prev === day ? null : day));
+  };
 
   const handleDrop = (day: number, e: { preventDefault: () => void; dataTransfer: DataTransfer }) => {
     e.preventDefault();
@@ -2928,16 +2876,18 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
         />
       </div>
 
-      <ListGroup>
-        <CashTimeline
-          nodes={timelineNodes}
-          unscheduledEvents={unscheduledEvents}
-          cashAtMonthStart={cashAtMonthStart}
-          daysInMonth={daysInMonth}
-          currentMonth={currentMonth}
-          selectedDay={selectedDay}
-          onSelectDay={setSelectedDay}
-        />
+      <ListGroup label={`Cash trajectory · ${monthToDate(currentMonth).toLocaleDateString("en-GB", { month: "long" })}`}>
+        <div className="px-[18px] pt-5 pb-[18px]">
+          <CashChart
+            dailyBalances={dailyBalances}
+            cashAtMonthStart={cashAtMonthStart}
+            daysInMonth={daysInMonth}
+            eventDays={eventDays}
+            selectedDay={selectedDay}
+            onSelectDay={setSelectedDay}
+            todayDay={todayDay}
+          />
+        </div>
       </ListGroup>
 
       {/* Summary strip */}
@@ -2951,10 +2901,14 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
         <span style={{ color: monthTotals.end >= cashAtMonthStart ? "var(--green)" : "var(--red)" }}>
           Ending <strong className="tabular-nums">{formatMoney(monthTotals.end)}</strong>
         </span>
-        {unscheduledEvents.length > 0 && (
-          <span className="text-[var(--fg3)]">{unscheduledEvents.length} item{unscheduledEvents.length > 1 ? "s" : ""} not pinned to a day →</span>
-        )}
       </div>
+
+      {armedEvent && (
+        <div className="flex items-center justify-between rounded-[12px] bg-[var(--accent)] px-[18px] py-2.5 text-[13px] text-white">
+          <span>Tap a day to place &ldquo;{armedEvent.name}&rdquo;</span>
+          <button type="button" onClick={() => setArmedEventId(null)} className="underline underline-offset-2 hover:opacity-80">Cancel</button>
+        </div>
+      )}
 
       {/* Main layout: calendar + sidebar */}
       <div className="flex items-start gap-5 max-lg:flex-col">
@@ -2978,14 +2932,17 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
               return (
                 <div
                   key={day}
-                  onClick={() => setSelectedDay(isSelected ? null : day)}
+                  onClick={() => handleDayClick(day)}
                   onDragOver={(e) => { e.preventDefault(); setDragOverDay(day); }}
                   onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverDay(null); }}
                   onDrop={(e) => handleDrop(day, e)}
                   className="min-h-[88px] cursor-pointer border-r border-b border-[var(--sep)] p-1.5 transition-colors"
                   style={{
                     background: isDragOver || isSelected ? "var(--fill)" : undefined,
-                    boxShadow: isToday ? "inset 0 0 0 1.5px var(--accent)" : undefined,
+                    boxShadow: [
+                      isToday ? "inset 0 0 0 1.5px var(--accent)" : "",
+                      armedEvent ? "inset 0 0 0 1px var(--sep)" : "",
+                    ].filter(Boolean).join(", ") || undefined,
                   }}
                 >
                   <div
@@ -3030,32 +2987,39 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
           <div className="sticky top-4 overflow-hidden rounded-[12px] bg-[var(--card)]">
             <div className="border-b border-[var(--sep)] px-4 py-3">
               <div className="text-[13px] text-[var(--fg2)]">Not pinned to a day</div>
-              <div className="mt-1 text-[12px] leading-snug text-[var(--fg3)]">Drag onto a day to assign, or leave here for monthly totals.</div>
+              <div className="mt-1 text-[12px] leading-snug text-[var(--fg3)]">Drag onto a day, or tap to arm it and then tap a day.</div>
             </div>
             {unscheduledEvents.length === 0 ? (
               <p className="px-4 py-6 text-center text-[13px] text-[var(--fg3)]">All items have a day pinned.</p>
             ) : (
               <div>
-                {unscheduledEvents.map((ev, i) => (
-                  <div
-                    key={ev.id}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData("application/json", JSON.stringify({ id: ev.id, type: ev.type } satisfies CalendarDragItem));
-                      e.dataTransfer.effectAllowed = "move";
-                    }}
-                    className="flex cursor-grab items-center gap-2.5 px-4 py-2.5 select-none active:cursor-grabbing"
-                    style={i > 0 ? { borderTop: "1px solid var(--sep)" } : undefined}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] text-[var(--fg)]">{ev.name}</div>
-                      <div className="text-[12px] tabular-nums" style={{ color: EVENT_COLOR[ev.type] }}>
-                        {ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}
+                {unscheduledEvents.map((ev, i) => {
+                  const armed = armedEventId === ev.id;
+                  return (
+                    <div
+                      key={ev.id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("application/json", JSON.stringify({ id: ev.id, type: ev.type } satisfies CalendarDragItem));
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onClick={() => setArmedEventId((prev) => (prev === ev.id ? null : ev.id))}
+                      className="flex cursor-grab items-center gap-2.5 px-4 py-2.5 select-none active:cursor-grabbing"
+                      style={{
+                        borderTop: i > 0 ? "1px solid var(--sep)" : undefined,
+                        background: armed ? "var(--fill)" : undefined,
+                      }}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[13px] text-[var(--fg)]">{ev.name}</div>
+                        <div className="text-[12px] tabular-nums" style={{ color: EVENT_COLOR[ev.type] }}>
+                          {ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}
+                        </div>
                       </div>
+                      <span className="shrink-0 text-[13px]" style={{ color: armed ? "var(--accent)" : "var(--fg3)" }} aria-hidden>⠿</span>
                     </div>
-                    <span className="shrink-0 text-[13px] text-[var(--fg3)]" aria-hidden>⠿</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
