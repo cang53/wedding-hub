@@ -2568,6 +2568,10 @@ type CalendarDragItem = { id: string; type: "income" | "expense" | "purchase" };
 type CalEv = { id: string; type: "income" | "expense" | "purchase"; name: string; amount: number; day: number | null };
 type TLNode = { day: number; events: (CalEv & { day: number })[]; balanceBefore: number; balanceAfter: number };
 
+const EVENT_COLOR: Record<CalEv["type"], string> = {
+  income: "var(--green)", expense: "var(--fg2)", purchase: "var(--amber)",
+};
+
 // ============================================================================
 // CashTimeline — horizontal flow of events + running balance
 // ============================================================================
@@ -2588,35 +2592,26 @@ function CashTimeline({
   const finalEnd = scheduledEnd + unschedNet;
   const [cY, cM] = currentMonth.split("-").map(Number);
 
-  const lineCol = (bal: number) => bal >= 0 ? "#7c8a6b" : "#7a1f2b";
-  const txtCol = (bal: number) => bal >= 0 ? "text-sage" : "text-burgundy";
+  const balColor = (bal: number) => (bal >= 0 ? "var(--green)" : "var(--red)");
 
-  const Connector = ({ fromBal, days }: { fromBal: number; days: number }) => {
-    const c = lineCol(fromBal);
-    return (
-      <div
-        className="flex flex-col items-center justify-center relative min-w-[28px]"
-        style={{ flexGrow: Math.max(1, days), flexBasis: 0 }}
-      >
-        <div className="text-[9px] font-mono text-ink-soft/40 mb-1.5 h-3 leading-none text-center">
-          {days > 1 ? `${days}d` : ""}
-        </div>
-        <div className="w-full h-[2px]" style={{ background: `linear-gradient(to right, ${c}80, ${c})` }} />
-        <div className={`mt-1.5 text-[9px] font-mono ${txtCol(fromBal)}`}>{formatMoneyShort(fromBal)}</div>
-      </div>
-    );
-  };
+  const Connector = ({ fromBal, days }: { fromBal: number; days: number }) => (
+    <div className="relative flex min-w-[28px] flex-col items-center justify-center" style={{ flexGrow: Math.max(1, days), flexBasis: 0 }}>
+      <div className="mb-1.5 h-3 text-center text-[9px] leading-none text-[var(--fg3)]">{days > 1 ? `${days}d` : ""}</div>
+      <div className="h-px w-full bg-[var(--sep)]" />
+      <div className="mt-1.5 text-[9px] tabular-nums" style={{ color: balColor(fromBal) }}>{formatMoneyShort(fromBal)}</div>
+    </div>
+  );
 
   const Cap = ({ label, amount, delta }: { label: string; amount: number; delta?: number }) => (
-    <div className="flex flex-col items-center gap-1 shrink-0">
-      <div className="text-[9px] uppercase tracking-[0.2em] text-ink-soft font-medium">{label}</div>
-      <div className={`w-[52px] h-[52px] rounded-full border-2 flex items-center justify-center ${amount >= 0 ? "border-sage bg-sage/10" : "border-burgundy bg-burgundy/10"}`}>
-        <div className={`text-[9px] font-mono font-bold text-center leading-tight ${txtCol(amount)}`}>
+    <div className="flex shrink-0 flex-col items-center gap-1">
+      <div className="text-[9px] tracking-[0.15em] text-[var(--fg3)] uppercase">{label}</div>
+      <div className="flex h-[52px] w-[52px] items-center justify-center rounded-full border-[1.5px]" style={{ borderColor: balColor(amount) }}>
+        <div className="text-center text-[9px] leading-tight font-bold tabular-nums" style={{ color: balColor(amount) }}>
           {formatMoneyShort(amount)}
         </div>
       </div>
       {delta !== undefined && (
-        <div className={`text-[9px] font-medium ${delta >= 0 ? "text-sage" : "text-burgundy"}`}>
+        <div className="text-[9px] font-medium" style={{ color: delta >= 0 ? "var(--green)" : "var(--red)" }}>
           {delta >= 0 ? "▲" : "▼"} {formatMoneyShort(Math.abs(delta))}
         </div>
       )}
@@ -2624,100 +2619,90 @@ function CashTimeline({
   );
 
   return (
-    <div className="mb-5">
-      <div className="flex flex-wrap items-center gap-y-3 py-2 px-1">
-        <Cap label="Start" amount={cashAtMonthStart} />
+    <div className="flex flex-wrap items-center gap-y-3 px-1 py-2">
+      <Cap label="Start" amount={cashAtMonthStart} />
 
-        {nodes.length === 0 && !unscheduledEvents.length ? (
-          <div className="flex-1 mx-6 text-[12px] italic text-ink-soft">
-            Pin events to days on the calendar to see the flow here.
-          </div>
-        ) : (
-          <>
-            {nodes.map((node, idx) => {
-              const prevDay = idx === 0 ? 0 : nodes[idx - 1].day;
-              const isSelected = selectedDay === node.day;
-              const dayLabel = new Date(cY, cM - 1, node.day)
-                .toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+      {nodes.length === 0 && !unscheduledEvents.length ? (
+        <div className="mx-6 flex-1 text-[13px] text-[var(--fg3)]">Pin events to days on the calendar to see the flow here.</div>
+      ) : (
+        <>
+          {nodes.map((node, idx) => {
+            const prevDay = idx === 0 ? 0 : nodes[idx - 1].day;
+            const isSelected = selectedDay === node.day;
+            const dayLabel = new Date(cY, cM - 1, node.day)
+              .toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
 
-              return (
-                <div key={node.day} className="contents">
-                  <Connector fromBal={node.balanceBefore} days={node.day - prevDay} />
-                  <div
-                    onClick={() => onSelectDay(isSelected ? null : node.day)}
-                    className={`shrink-0 cursor-pointer rounded-[6px] border transition-all min-w-[112px] max-w-[160px] p-2.5
-                      ${isSelected
-                        ? "border-ink bg-ink text-cream shadow-lg scale-[1.03] z-10 relative"
-                        : "border-line bg-paper hover:border-ink/30 hover:shadow-soft"
-                      }`}
-                  >
-                    <div className={`text-[10px] font-medium mb-2 ${isSelected ? "text-cream/60" : "text-ink-soft"}`}>{dayLabel}</div>
-                    <div className="space-y-1.5">
-                      {node.events.map((ev) => (
-                        <div key={ev.id} className="flex items-start gap-1.5">
-                          <span className="text-[11px] shrink-0">{ev.type === "income" ? "💼" : ev.type === "expense" ? "🔁" : "🛋️"}</span>
-                          <div className="min-w-0">
-                            <div className={`text-[10px] truncate leading-tight ${isSelected ? "text-cream/80" : "text-ink"}`}>{ev.name}</div>
-                            <div className={`text-[10px] font-mono font-medium ${
-                              isSelected
-                                ? ev.type === "income" ? "text-[#a8c49a]" : "text-[#c47a7a]"
-                                : ev.type === "income" ? "text-sage" : "text-burgundy"
-                            }`}>{ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}</div>
-                          </div>
+            return (
+              <div key={node.day} className="contents">
+                <Connector fromBal={node.balanceBefore} days={node.day - prevDay} />
+                <button
+                  type="button"
+                  onClick={() => onSelectDay(isSelected ? null : node.day)}
+                  className="min-w-[112px] max-w-[160px] shrink-0 rounded-[10px] p-2.5 text-left transition-[box-shadow]"
+                  style={{ background: isSelected ? "var(--accent)" : "var(--card)", boxShadow: isSelected ? "0 4px 14px rgba(0,0,0,.2)" : "none" }}
+                >
+                  <div className="mb-2 text-[10px]" style={{ color: isSelected ? "rgba(255,255,255,.7)" : "var(--fg3)" }}>{dayLabel}</div>
+                  <div className="space-y-1.5">
+                    {node.events.map((ev) => (
+                      <div key={ev.id} className="flex items-start justify-between gap-1.5">
+                        <div className="min-w-0 truncate text-[10px] leading-tight" style={{ color: isSelected ? "rgba(255,255,255,.9)" : "var(--fg)" }}>
+                          {ev.name}
                         </div>
-                      ))}
-                    </div>
-                    <div className={`mt-2 pt-1.5 border-t flex items-center justify-between gap-2 ${isSelected ? "border-cream/20" : "border-line"}`}>
-                      <span className={`text-[9px] ${isSelected ? "text-cream/50" : "text-ink-soft"}`}>After</span>
-                      <span className={`text-[11px] font-mono font-bold ${
-                        isSelected
-                          ? node.balanceAfter >= 0 ? "text-[#a8c49a]" : "text-[#c47a7a]"
-                          : txtCol(node.balanceAfter)
-                      }`}>{formatMoneyShort(node.balanceAfter)}</span>
-                    </div>
+                        <div
+                          className="shrink-0 text-[10px] font-medium tabular-nums"
+                          style={{ color: isSelected ? "#fff" : EVENT_COLOR[ev.type] }}
+                        >
+                          {ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                </div>
-              );
-            })}
-
-            {/* Connector from last node to end */}
-            <Connector
-              fromBal={nodes.length > 0 ? nodes[nodes.length - 1].balanceAfter : cashAtMonthStart}
-              days={daysInMonth - (nodes.length > 0 ? nodes[nodes.length - 1].day : 0)}
-            />
-
-            {/* Unscheduled block */}
-            {unscheduledEvents.length > 0 && (
-              <>
-                <div className="shrink-0 flex items-center" style={{ width: 24 }}>
-                  <div className="w-full border-t-2 border-dashed border-ink-soft/25" />
-                </div>
-                <div className="shrink-0 rounded-[6px] border border-dashed border-line/70 p-2.5 min-w-[130px] bg-cream/30">
-                  <div className="text-[10px] text-ink-soft font-medium mb-1.5">Unscheduled ({unscheduledEvents.length})</div>
-                  {unscheduledEvents.slice(0, 4).map((ev) => (
-                    <div key={ev.id} className="flex items-center gap-1 mb-0.5">
-                      <span className="text-[10px]">{ev.type === "income" ? "💼" : ev.type === "expense" ? "🔁" : "🛋️"}</span>
-                      <span className={`text-[9px] font-mono shrink-0 ${ev.type === "income" ? "text-sage" : "text-burgundy"}`}>
-                        {ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}
-                      </span>
-                      <span className="text-[9px] text-ink-soft truncate">{ev.name}</span>
-                    </div>
-                  ))}
-                  {unscheduledEvents.length > 4 && <div className="text-[9px] text-ink-soft italic">+{unscheduledEvents.length - 4} more</div>}
-                  <div className={`mt-1.5 pt-1 border-t border-dashed border-line/50 text-[9px] font-mono font-medium ${unschedNet >= 0 ? "text-sage" : "text-burgundy"}`}>
-                    Net: {unschedNet >= 0 ? "+" : "−"}{formatMoney(Math.abs(unschedNet))}
+                  <div className="mt-2 flex items-center justify-between gap-2 border-t pt-1.5" style={{ borderColor: isSelected ? "rgba(255,255,255,.25)" : "var(--sep)" }}>
+                    <span className="text-[9px]" style={{ color: isSelected ? "rgba(255,255,255,.7)" : "var(--fg3)" }}>After</span>
+                    <span className="text-[11px] font-bold tabular-nums" style={{ color: isSelected ? "#fff" : balColor(node.balanceAfter) }}>
+                      {formatMoneyShort(node.balanceAfter)}
+                    </span>
                   </div>
-                </div>
-                <div className="shrink-0 flex items-center" style={{ width: 16 }}>
-                  <div className="w-full border-t-2 border-dashed border-ink-soft/25" />
-                </div>
-              </>
-            )}
-          </>
-        )}
+                </button>
+              </div>
+            );
+          })}
 
-        <Cap label="End" amount={finalEnd} delta={finalEnd - cashAtMonthStart} />
-      </div>
+          {/* Connector from last node to end */}
+          <Connector
+            fromBal={nodes.length > 0 ? nodes[nodes.length - 1].balanceAfter : cashAtMonthStart}
+            days={daysInMonth - (nodes.length > 0 ? nodes[nodes.length - 1].day : 0)}
+          />
+
+          {/* Unscheduled block */}
+          {unscheduledEvents.length > 0 && (
+            <>
+              <div className="flex w-6 shrink-0 items-center"><div className="w-full border-t border-dashed border-[var(--sep)]" /></div>
+              <div className="min-w-[130px] shrink-0 rounded-[10px] border border-dashed border-[var(--sep)] p-2.5">
+                <div className="mb-1.5 text-[10px] text-[var(--fg3)]">Unscheduled ({unscheduledEvents.length})</div>
+                {unscheduledEvents.slice(0, 4).map((ev) => (
+                  <div key={ev.id} className="mb-0.5 flex items-center gap-1.5">
+                    <span className="shrink-0 text-[9px] font-medium tabular-nums" style={{ color: EVENT_COLOR[ev.type] }}>
+                      {ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}
+                    </span>
+                    <span className="truncate text-[9px] text-[var(--fg2)]">{ev.name}</span>
+                  </div>
+                ))}
+                {unscheduledEvents.length > 4 && <div className="text-[9px] text-[var(--fg3)]">+{unscheduledEvents.length - 4} more</div>}
+                <div
+                  className="mt-1.5 border-t border-dashed border-[var(--sep)] pt-1 text-[9px] font-medium tabular-nums"
+                  style={{ color: unschedNet >= 0 ? "var(--green)" : "var(--red)" }}
+                >
+                  Net: {unschedNet >= 0 ? "+" : "−"}{formatMoney(Math.abs(unschedNet))}
+                </div>
+              </div>
+              <div className="flex w-4 shrink-0 items-center"><div className="w-full border-t border-dashed border-[var(--sep)]" /></div>
+            </>
+          )}
+        </>
+      )}
+
+      <Cap label="End" amount={finalEnd} delta={finalEnd - cashAtMonthStart} />
     </div>
   );
 }
@@ -2906,72 +2891,83 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
   };
 
   return (
-    <div className="animate-in fade-in duration-200">
-      {/* Top bar: navigation + person filter */}
-      <div className="flex items-center gap-4 mb-4 flex-wrap">
-        <button type="button" onClick={() => goMonth(-1)} disabled={currentMonth <= settings.start_month}
-          className="px-3 py-1.5 text-[13px] border border-line rounded-[4px] hover:bg-cream/60 disabled:opacity-30 disabled:cursor-not-allowed">← Prev</button>
-        <div className="font-serif text-[22px] text-ink flex-1 text-center">
-          {monthToDate(currentMonth).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}
+    <div className="font-apple flex flex-col gap-5 text-[var(--fg)]">
+      {/* Month nav + person filter */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => goMonth(-1)}
+            disabled={currentMonth <= settings.start_month}
+            aria-label="Previous month"
+            className="text-[20px] leading-none text-[var(--accent)] hover:opacity-60 disabled:opacity-30"
+          >
+            ‹
+          </button>
+          <div className="w-[170px] text-center text-[17px] font-semibold tracking-[-0.02em]">
+            {monthToDate(currentMonth).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}
+          </div>
+          <button
+            type="button"
+            onClick={() => goMonth(1)}
+            disabled={currentMonth >= maxMonth}
+            aria-label="Next month"
+            className="text-[20px] leading-none text-[var(--accent)] hover:opacity-60 disabled:opacity-30"
+          >
+            ›
+          </button>
         </div>
-        <button type="button" onClick={() => goMonth(1)} disabled={currentMonth >= maxMonth}
-          className="px-3 py-1.5 text-[13px] border border-line rounded-[4px] hover:bg-cream/60 disabled:opacity-30 disabled:cursor-not-allowed">Next →</button>
+        <Segmented
+          options={[
+            { value: "all", label: "All" },
+            { value: "groom", label: "Celal" },
+            { value: "bride", label: "Selver" },
+          ]}
+          value={personFilter}
+          onChange={setPersonFilter}
+        />
       </div>
 
-      {/* Person filter */}
-      <div className="flex gap-0 mb-4 border border-line rounded-[6px] overflow-hidden bg-cream-deep/40 w-fit">
-        {(["all", "groom", "bride"] as const).map((f) => {
-          const active = personFilter === f;
-          const activeClass = f === "groom" ? "bg-paper text-sage border-b-2 border-sage shadow-soft"
-            : f === "bride" ? "bg-paper text-rose border-b-2 border-rose shadow-soft"
-            : "bg-paper text-ink border-b-2 border-ink shadow-soft";
-          return (
-            <button key={f} type="button" onClick={() => setPersonFilter(f)}
-              className={`px-5 py-2 text-[12px] font-medium transition-colors border-b-2 ${active ? activeClass : "border-transparent text-ink-soft hover:bg-cream/60 hover:text-ink"}`}>
-              {f === "all" ? "All" : f === "groom" ? "Groom" : "Bride"}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Cash flow timeline */}
-      <CashTimeline
-        nodes={timelineNodes}
-        unscheduledEvents={unscheduledEvents}
-        cashAtMonthStart={cashAtMonthStart}
-        daysInMonth={daysInMonth}
-        currentMonth={currentMonth}
-        selectedDay={selectedDay}
-        onSelectDay={setSelectedDay}
-      />
+      <ListGroup>
+        <CashTimeline
+          nodes={timelineNodes}
+          unscheduledEvents={unscheduledEvents}
+          cashAtMonthStart={cashAtMonthStart}
+          daysInMonth={daysInMonth}
+          currentMonth={currentMonth}
+          selectedDay={selectedDay}
+          onSelectDay={setSelectedDay}
+        />
+      </ListGroup>
 
       {/* Summary strip */}
-      <div className="mb-4 px-5 py-3 bg-cream-deep/60 border border-line rounded-[4px] flex flex-wrap gap-x-5 gap-y-1 text-[12px]">
-        <span className="text-ink-soft">Starting <strong className="font-mono text-ink">{formatMoney(cashAtMonthStart)}</strong></span>
-        <span className="text-sage">Income <strong className="font-mono">+{formatMoney(monthTotals.inc)}</strong></span>
-        <span className="text-burgundy">Expenses <strong className="font-mono">−{formatMoney(monthTotals.exp)}</strong></span>
-        {monthTotals.pur > 0 && <span className="text-gold">Purchases <strong className="font-mono">−{formatMoney(monthTotals.pur)}</strong></span>}
-        <span className={monthTotals.end >= cashAtMonthStart ? "text-sage" : "text-burgundy"}>
-          Ending <strong className="font-mono">{formatMoney(monthTotals.end)}</strong>
+      <div className="flex flex-wrap gap-x-5 gap-y-1.5 rounded-[12px] bg-[var(--fill)] px-[18px] py-3 text-[13px]">
+        <span className="text-[var(--fg2)]">Starting <strong className="tabular-nums text-[var(--fg)]">{formatMoney(cashAtMonthStart)}</strong></span>
+        <span style={{ color: "var(--green)" }}>Income <strong className="tabular-nums">+{formatMoney(monthTotals.inc)}</strong></span>
+        <span className="text-[var(--fg2)]">Expenses <strong className="tabular-nums">−{formatMoney(monthTotals.exp)}</strong></span>
+        {monthTotals.pur > 0 && (
+          <span style={{ color: "var(--amber)" }}>Purchases <strong className="tabular-nums">−{formatMoney(monthTotals.pur)}</strong></span>
+        )}
+        <span style={{ color: monthTotals.end >= cashAtMonthStart ? "var(--green)" : "var(--red)" }}>
+          Ending <strong className="tabular-nums">{formatMoney(monthTotals.end)}</strong>
         </span>
         {unscheduledEvents.length > 0 && (
-          <span className="text-ink-soft italic">{unscheduledEvents.length} item{unscheduledEvents.length > 1 ? "s" : ""} not pinned to a day →</span>
+          <span className="text-[var(--fg3)]">{unscheduledEvents.length} item{unscheduledEvents.length > 1 ? "s" : ""} not pinned to a day →</span>
         )}
       </div>
 
       {/* Main layout: calendar + sidebar */}
-      <div className="flex gap-5 items-start max-lg:flex-col">
-
+      <div className="flex items-start gap-5 max-lg:flex-col">
         {/* Calendar grid */}
-        <div className="flex-1 min-w-0 bg-paper border border-line rounded-[4px] overflow-hidden shadow-soft">
-          <div className="grid grid-cols-7 border-b border-line">
+        <div className="min-w-0 flex-1 overflow-hidden rounded-[12px] bg-[var(--card)]">
+          <div className="grid grid-cols-7 border-b border-[var(--sep)]">
             {DAY_LABELS.map((d) => (
-              <div key={d} className="py-2 text-center text-[10px] uppercase tracking-[0.2em] text-ink-soft font-medium">{d}</div>
+              <div key={d} className="py-2 text-center text-[11px] tracking-[0.1em] text-[var(--fg3)]">{d}</div>
             ))}
           </div>
           <div className="grid grid-cols-7">
             {Array(leadingCells).fill(null).map((_, i) => (
-              <div key={"lead-" + i} className="min-h-[88px] border-r border-b border-line/50 bg-cream/20" />
+              <div key={"lead-" + i} className="min-h-[88px] border-r border-b border-[var(--sep)]" />
             ))}
             {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
               const dayEvents = scheduledEvents.filter((e) => e.day === day);
@@ -2979,39 +2975,49 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
               const isToday = day === todayDay;
               const isSelected = day === selectedDay;
               const isDragOver = dragOverDay === day;
-              const isNegativeBal = bal < 0 && dayEvents.length > 0;
               return (
-                <div key={day}
+                <div
+                  key={day}
                   onClick={() => setSelectedDay(isSelected ? null : day)}
                   onDragOver={(e) => { e.preventDefault(); setDragOverDay(day); }}
                   onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverDay(null); }}
                   onDrop={(e) => handleDrop(day, e)}
-                  className={`min-h-[88px] border-r border-b border-line/50 p-1.5 cursor-pointer transition-colors
-                    ${isDragOver ? "ring-2 ring-inset ring-gold/60 bg-gold/8" : isSelected ? "bg-cream-deep" : isNegativeBal ? "bg-burgundy/5 hover:bg-burgundy/10" : "hover:bg-cream/60"}
-                    ${isToday ? "ring-2 ring-ink/20 ring-inset" : ""}
-                  `}
+                  className="min-h-[88px] cursor-pointer border-r border-b border-[var(--sep)] p-1.5 transition-colors"
+                  style={{
+                    background: isDragOver || isSelected ? "var(--fill)" : undefined,
+                    boxShadow: isToday ? "inset 0 0 0 1.5px var(--accent)" : undefined,
+                  }}
                 >
-                  <div className={`text-right text-[11px] mb-1 ${isToday ? "font-bold text-ink" : "text-ink-soft/60"}`}>{day}</div>
+                  <div
+                    className="mb-1 text-right text-[11px] tabular-nums"
+                    style={{ color: isToday ? "var(--accent)" : "var(--fg3)", fontWeight: isToday ? 700 : 400 }}
+                  >
+                    {day}
+                  </div>
                   <div className="space-y-0.5">
                     {dayEvents.map((ev) => (
-                      <div key={ev.id} className={`group/chip rounded px-1 py-0.5 text-[9px] leading-tight border flex items-start gap-0.5
-                        ${ev.type === "income" ? "bg-sage/15 text-sage border-sage/30" : ev.type === "expense" ? "bg-burgundy/10 text-burgundy border-burgundy/20" : "bg-gold/15 text-gold border-gold/30"}
-                      `}>
-                        <div className="flex-1 min-w-0">
-                          <div className="truncate font-medium">{ev.name}</div>
-                          <div className="font-mono">{ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}</div>
+                      <div key={ev.id} className="group/chip flex items-start justify-between gap-0.5 rounded-[4px] bg-[var(--fill)] px-1 py-0.5 text-[9px] leading-tight">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{ev.name}</div>
+                          <div className="font-medium tabular-nums" style={{ color: EVENT_COLOR[ev.type] }}>
+                            {ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}
+                          </div>
                         </div>
                         <button
                           type="button"
                           onClick={(e) => handleUnassign(ev, e)}
-                          className="opacity-0 group-hover/chip:opacity-70 hover:!opacity-100 text-[10px] leading-none shrink-0 mt-0.5"
+                          className="mt-0.5 shrink-0 text-[10px] leading-none text-[var(--fg3)] opacity-0 group-hover/chip:opacity-100 hover:!opacity-100 hover:text-[var(--accent)]"
                           title="Move back to unscheduled"
-                        >×</button>
+                        >
+                          ×
+                        </button>
                       </div>
                     ))}
                   </div>
                   {dayEvents.length > 0 && (
-                    <div className={`mt-1 text-right font-mono text-[9px] ${bal >= 0 ? "text-sage" : "text-burgundy"}`}>{formatMoney(bal)}</div>
+                    <div className="mt-1 text-right text-[9px] tabular-nums" style={{ color: bal >= 0 ? "var(--green)" : "var(--red)" }}>
+                      {formatMoney(bal)}
+                    </div>
                   )}
                 </div>
               );
@@ -3021,35 +3027,36 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
 
         {/* Sidebar — unscheduled items */}
         <div className="w-60 shrink-0 max-lg:w-full">
-          <div className="bg-paper border border-line rounded-[4px] shadow-soft sticky top-4">
-            <div className="px-4 py-3 border-b border-line">
-              <div className="text-[10px] uppercase tracking-[0.3em] text-ink-soft font-medium">Not pinned to a day</div>
-              <div className="text-[10px] text-ink-soft mt-1 leading-snug">Drag onto a day to assign, or leave here for monthly totals.</div>
+          <div className="sticky top-4 overflow-hidden rounded-[12px] bg-[var(--card)]">
+            <div className="border-b border-[var(--sep)] px-4 py-3">
+              <div className="text-[13px] text-[var(--fg2)]">Not pinned to a day</div>
+              <div className="mt-1 text-[12px] leading-snug text-[var(--fg3)]">Drag onto a day to assign, or leave here for monthly totals.</div>
             </div>
             {unscheduledEvents.length === 0 ? (
-              <p className="px-4 py-6 text-[11px] italic text-ink-soft text-center">All items have a day pinned.</p>
+              <p className="px-4 py-6 text-center text-[13px] text-[var(--fg3)]">All items have a day pinned.</p>
             ) : (
-              <ul className="divide-y divide-line">
-                {unscheduledEvents.map((ev) => (
-                  <li key={ev.id}
+              <div>
+                {unscheduledEvents.map((ev, i) => (
+                  <div
+                    key={ev.id}
                     draggable
                     onDragStart={(e) => {
                       e.dataTransfer.setData("application/json", JSON.stringify({ id: ev.id, type: ev.type } satisfies CalendarDragItem));
                       e.dataTransfer.effectAllowed = "move";
                     }}
-                    className="flex items-center gap-2.5 px-3 py-2.5 cursor-grab active:cursor-grabbing hover:bg-cream/40 group/item select-none"
+                    className="flex cursor-grab items-center gap-2.5 px-4 py-2.5 select-none active:cursor-grabbing"
+                    style={i > 0 ? { borderTop: "1px solid var(--sep)" } : undefined}
                   >
-                    <span className="text-[13px] shrink-0">{ev.type === "income" ? "💼" : ev.type === "expense" ? "🔁" : "🛋️"}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[11px] font-medium text-ink truncate">{ev.name}</div>
-                      <div className={`text-[10px] font-mono ${ev.type === "income" ? "text-sage" : "text-burgundy"}`}>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13px] text-[var(--fg)]">{ev.name}</div>
+                      <div className="text-[12px] tabular-nums" style={{ color: EVENT_COLOR[ev.type] }}>
                         {ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}
                       </div>
                     </div>
-                    <span className="text-[13px] text-ink-soft/30 group-hover/item:text-ink-soft shrink-0" aria-hidden>⠿</span>
-                  </li>
+                    <span className="shrink-0 text-[13px] text-[var(--fg3)]" aria-hidden>⠿</span>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
           </div>
         </div>
@@ -3063,30 +3070,31 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
         const date = new Date(y, m - 1, selectedDay);
         const dateLabel = date.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
         return (
-          <div className="mt-4 bg-paper border border-line rounded-[4px] shadow-soft p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="font-serif text-[18px] text-ink">{dateLabel}</div>
-              <button type="button" onClick={() => setSelectedDay(null)} className="text-ink-soft hover:text-ink text-[20px] leading-none">×</button>
+          <div className="overflow-hidden rounded-[12px] bg-[var(--card)] p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="text-[17px] font-semibold tracking-[-0.02em]">{dateLabel}</div>
+              <button type="button" onClick={() => setSelectedDay(null)} className="text-[20px] leading-none text-[var(--fg3)] hover:text-[var(--fg)]">×</button>
             </div>
             <div className="space-y-1">
-              <div className="flex justify-between text-[12px] text-ink-soft pb-2 border-b border-line">
+              <div className="flex justify-between border-b border-[var(--sep)] pb-2 text-[13px] text-[var(--fg2)]">
                 <span>Opening balance</span>
-                <span className="font-mono text-ink">{formatMoney(openBal)}</span>
+                <span className="tabular-nums text-[var(--fg)]">{formatMoney(openBal)}</span>
               </div>
               {dayEvents.length === 0 ? (
-                <p className="text-[13px] italic text-ink-soft py-3">No events pinned to this day.</p>
+                <p className="py-3 text-[14px] text-[var(--fg3)]">No events pinned to this day.</p>
               ) : dayEvents.map((ev) => (
-                <div key={ev.id} className="flex items-center gap-3 py-1.5 text-[13px]">
-                  <span className="text-[16px]">{ev.type === "income" ? "💼" : ev.type === "expense" ? "🔁" : "🛋️"}</span>
-                  <span className="flex-1 text-ink">{ev.name}</span>
-                  <span className={`font-mono ${ev.type === "income" ? "text-sage" : "text-burgundy"}`}>
+                <div key={ev.id} className="flex items-center gap-3 py-1.5 text-[14px]">
+                  <span className="flex-1 text-[var(--fg)]">{ev.name}</span>
+                  <span className="tabular-nums" style={{ color: EVENT_COLOR[ev.type] }}>
                     {ev.type === "income" ? "+" : "−"}{formatMoney(ev.amount)}
                   </span>
                 </div>
               ))}
-              <div className="flex justify-between text-[13px] font-medium pt-2 border-t border-line">
+              <div className="flex justify-between border-t border-[var(--sep)] pt-2 text-[14px] font-medium">
                 <span>Closing balance</span>
-                <span className={`font-mono font-bold ${closeBal >= 0 ? "text-sage" : "text-burgundy"}`}>{formatMoney(closeBal)}</span>
+                <span className="tabular-nums font-bold" style={{ color: closeBal >= 0 ? "var(--green)" : "var(--red)" }}>
+                  {formatMoney(closeBal)}
+                </span>
               </div>
             </div>
           </div>
