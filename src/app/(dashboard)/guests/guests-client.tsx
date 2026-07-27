@@ -66,7 +66,8 @@ interface Props {
 }
 
 type GuestView = "party" | "list";
-type GroupBy = "none" | "rsvp" | "side";
+/** Ordering *within* each side's column — the split by side is the layout itself. */
+type GroupBy = "none" | "rsvp";
 
 export function GuestsClient({ initialGuests }: Props) {
   const [guests, setGuests] = useState<GuestRow[]>(initialGuests);
@@ -112,8 +113,6 @@ export function GuestsClient({ initialGuests }: Props) {
     .filter((g) => !searchLower || g.name.toLowerCase().includes(searchLower))
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name));
-
-  const guestGroups = groupGuests(visibleGuests, groupBy);
 
   const handleDelete = (g: GuestRow) => {
     if (!confirm(`Delete "${g.name}"?`)) return;
@@ -195,7 +194,7 @@ export function GuestsClient({ initialGuests }: Props) {
         </div>
         {view === "list" && (
           <Segmented
-            options={[{ value: "none", label: "A–Z" }, { value: "rsvp", label: "RSVP" }, { value: "side", label: "Side" }]}
+            options={[{ value: "none", label: "A–Z" }, { value: "rsvp", label: "RSVP" }]}
             value={groupBy}
             onChange={setGroupBy}
           />
@@ -233,21 +232,13 @@ export function GuestsClient({ initialGuests }: Props) {
           </button>
         </div>
       ) : (
-        <div className="flex flex-col gap-6">
-          {guestGroups.map((group) => (
-            <ListGroup key={group.label ?? "all"} label={group.label}>
-              {group.guests.map((g) => (
-                <GuestListRow
-                  key={g.id}
-                  guest={g}
-                  onEdit={() => { setEditing(g); setDialogOpen(true); }}
-                  onCycleRsvp={() => patchGuest(g, { rsvp: NEXT_RSVP[g.rsvp] })}
-                  onToggleInvited={() => patchGuest(g, { invited: !g.invited })}
-                />
-              ))}
-            </ListGroup>
-          ))}
-        </div>
+        <GuestColumns
+          guests={visibleGuests}
+          groupBy={groupBy}
+          onEdit={(g) => { setEditing(g); setDialogOpen(true); }}
+          onCycleRsvp={(g) => patchGuest(g, { rsvp: NEXT_RSVP[g.rsvp] })}
+          onToggleInvited={(g) => patchGuest(g, { invited: !g.invited })}
+        />
       )}
 
       <GuestDialog
@@ -297,17 +288,22 @@ function GuestInitials({ guest, size = 32 }: { guest: GuestRow; size?: number })
 // ============================================================================
 
 function GuestListRow({
-  guest, onEdit, onCycleRsvp, onToggleInvited,
+  guest, onEdit, onCycleRsvp, onToggleInvited, compact = false,
 }: {
   guest: GuestRow;
   onEdit: () => void;
   onCycleRsvp: () => void;
   onToggleInvited: () => void;
+  /** Side-by-side columns are too narrow for the contact links; the edit
+   *  dialog still shows them. */
+  compact?: boolean;
 }) {
+  // In split-column mode the column header already states the side, so the
+  // row spends that space on category instead.
   const secondary = [
-    SIDE_LABEL[guest.side],
-    guest.plus_one ? `plus ${guest.plus_one_name || "one"}` : null,
+    compact ? null : SIDE_LABEL[guest.side],
     guest.category,
+    guest.plus_one ? `plus ${guest.plus_one_name || "one"}` : null,
   ].filter(Boolean).join(" · ");
 
   return (
@@ -325,7 +321,7 @@ function GuestListRow({
       </button>
 
       <div className="ml-auto flex flex-none items-center gap-2">
-        {guest.email && (
+        {!compact && guest.email && (
           <a
             href={`mailto:${guest.email}`}
             title={guest.email}
@@ -334,7 +330,7 @@ function GuestListRow({
             Email
           </a>
         )}
-        {guest.phone && (
+        {!compact && guest.phone && (
           <a
             href={`tel:${guest.phone}`}
             title={guest.phone}
@@ -376,20 +372,92 @@ function GuestListRow({
 // sectioned ListGroups instead of one flat alphabetical run.
 // ============================================================================
 
-function groupGuests(guests: GuestRow[], groupBy: "none" | "rsvp" | "side"): { label?: string; guests: GuestRow[] }[] {
+function groupGuests(guests: GuestRow[], groupBy: GroupBy): { label?: string; guests: GuestRow[] }[] {
   if (groupBy === "none") return [{ guests }];
 
-  if (groupBy === "rsvp") {
-    const order: GuestRsvp[] = ["yes", "pending", "no"];
-    return order
-      .map((rsvp) => ({ label: `${RSVP_LABEL[rsvp]} (${guests.filter((g) => g.rsvp === rsvp).length})`, guests: guests.filter((g) => g.rsvp === rsvp) }))
-      .filter((g) => g.guests.length > 0);
-  }
-
-  const order: GuestSide[] = ["groom", "bride", "both"];
+  const order: GuestRsvp[] = ["yes", "pending", "no"];
   return order
-    .map((side) => ({ label: `${SIDE_LABEL[side]} (${guests.filter((g) => g.side === side).length})`, guests: guests.filter((g) => g.side === side) }))
+    .map((rsvp) => ({
+      label: `${RSVP_LABEL[rsvp]} (${guests.filter((g) => g.rsvp === rsvp).length})`,
+      guests: guests.filter((g) => g.rsvp === rsvp),
+    }))
     .filter((g) => g.guests.length > 0);
+}
+
+interface ColumnHandlers {
+  onEdit: (g: GuestRow) => void;
+  onCycleRsvp: (g: GuestRow) => void;
+  onToggleInvited: (g: GuestRow) => void;
+}
+
+/**
+ * Celal's guests on the left, Selver's on the right, so you can see how the
+ * two halves of the room compare at a glance. Guests marked as belonging to
+ * both sides get a full-width section underneath rather than being counted
+ * twice. Stacks to a single column below lg, where two lists don't fit.
+ */
+function GuestColumns({
+  guests, groupBy, ...handlers
+}: { guests: GuestRow[]; groupBy: GroupBy } & ColumnHandlers) {
+  const groom = guests.filter((g) => g.side === "groom");
+  const bride = guests.filter((g) => g.side === "bride");
+  const both = guests.filter((g) => g.side === "both");
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="grid gap-5 lg:grid-cols-2">
+        <GuestColumn title={SIDE_LABEL.groom} guests={groom} groupBy={groupBy} {...handlers} />
+        <GuestColumn title={SIDE_LABEL.bride} guests={bride} groupBy={groupBy} {...handlers} />
+      </div>
+      {both.length > 0 && (
+        <GuestColumn title={SIDE_LABEL.both} guests={both} groupBy={groupBy} {...handlers} />
+      )}
+    </div>
+  );
+}
+
+function GuestColumn({
+  title, guests, groupBy, onEdit, onCycleRsvp, onToggleInvited,
+}: { title: string; guests: GuestRow[]; groupBy: GroupBy } & ColumnHandlers) {
+  const coming = guests.filter((g) => g.rsvp === "yes").length;
+  const pending = guests.filter((g) => g.rsvp === "pending").length;
+  const sections = groupGuests(guests, groupBy);
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2.5">
+      <div className="flex items-baseline justify-between gap-2 px-[18px]">
+        <span className="text-[15px] font-semibold tracking-[-0.016em]">{title}</span>
+        <span className="text-[13px] tabular-nums text-[var(--fg2)]">
+          {guests.length} · {coming} coming{pending > 0 ? ` · ${pending} pending` : ""}
+        </span>
+      </div>
+
+      {guests.length === 0 ? (
+        <ListGroup>
+          <ListRow>
+            <span className="text-[15px] text-[var(--fg2)]">No one on this side yet.</span>
+          </ListRow>
+        </ListGroup>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {sections.map((section) => (
+            <ListGroup key={section.label ?? "all"} label={section.label}>
+              {section.guests.map((g) => (
+                <GuestListRow
+                  key={g.id}
+                  guest={g}
+                  compact
+                  onEdit={() => onEdit(g)}
+                  onCycleRsvp={() => onCycleRsvp(g)}
+                  onToggleInvited={() => onToggleInvited(g)}
+                />
+              ))}
+            </ListGroup>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ============================================================================
