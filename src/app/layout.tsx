@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Cormorant_Garamond, Inter, Caveat } from "next/font/google";
 import "./globals.css";
 
@@ -30,6 +30,18 @@ const caveat = Caveat({
 export const metadata: Metadata = {
   title: "Notre Vie à Deux",
   description: "Wedding planning hub for Celal & his fiancée.",
+};
+
+/**
+ * `viewportFit: "cover"` is what makes iOS report real values for
+ * env(safe-area-inset-*). Without it Safari returns 0 for all of them, so
+ * the fixed bottom tab bar had no idea the home indicator was there and
+ * sat underneath it — where iOS also swallows taps for the swipe gesture.
+ */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

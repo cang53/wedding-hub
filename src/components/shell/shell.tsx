@@ -44,7 +44,9 @@ export function Shell({ children }: { children: ReactNode }) {
         <Sidebar pathname={pathname} theme={theme} onToggleTheme={toggleTheme} />
         <div className="flex min-w-0 flex-1 flex-col">
           <ScreenHeader pathname={pathname} theme={theme} onToggleTheme={toggleTheme} />
-          <main className="mx-auto w-full max-w-[1000px] flex-1 px-4 pt-[22px] pb-[120px] sm:px-6 md:px-10">
+          {/* Bottom padding clears the fixed tab bar (which now grows by the
+              home-indicator inset) plus breathing room under the last row. */}
+          <main className="mx-auto w-full max-w-[1000px] flex-1 px-4 pt-[22px] pb-[calc(120px+env(safe-area-inset-bottom))] sm:px-6 md:px-10">
             {children}
           </main>
         </div>
@@ -118,7 +120,10 @@ function ScreenHeader({
   return (
     <header
       className={cn(
-        "sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-[var(--sep)] px-4 py-3 sm:px-6 md:px-10",
+        // viewport-fit=cover lets the page run under the status bar / notch,
+        // so the header has to pay back the top inset itself.
+        "sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-[var(--sep)] px-4 pb-3 sm:px-6 md:px-10",
+        "pt-[calc(12px+env(safe-area-inset-top))]",
         NAV_MATERIAL
       )}
     >
@@ -145,11 +150,14 @@ function BottomNav({ pathname }: { pathname: string }) {
   return (
     <nav
       className={cn(
-        // Icon-only, so all eight fit without horizontal scrolling. The base
-        // bottom padding matters: env(safe-area-inset-bottom) is 0 on Android
-        // and older iPhones, which previously left the row sitting ~9px off
-        // the screen edge and awkward to hit.
-        "fixed inset-x-0 bottom-0 z-40 flex items-stretch gap-0.5 border-t border-[var(--sep)] px-2 pt-1.5 pb-[calc(14px+env(safe-area-inset-bottom))] lg:hidden",
+        // Icon-only, so all eight fit without horizontal scrolling.
+        // Bottom padding takes whichever is larger: a flat 18px, or enough to
+        // clear the home indicator. max() rather than a sum, so devices that
+        // report no inset (Android, older iPhones) still get real clearance
+        // and notched iPhones don't end up with a needlessly deep bar.
+        "fixed inset-x-0 bottom-0 z-40 flex items-stretch gap-0.5 border-t border-[var(--sep)] pt-1.5 lg:hidden",
+        "pb-[max(18px,calc(6px+env(safe-area-inset-bottom)))]",
+        "pl-[max(8px,env(safe-area-inset-left))] pr-[max(8px,env(safe-area-inset-right))]",
         NAV_MATERIAL
       )}
     >
