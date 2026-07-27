@@ -145,22 +145,29 @@ function BottomNav({ pathname }: { pathname: string }) {
   return (
     <nav
       className={cn(
-        "fixed inset-x-0 bottom-0 z-40 flex overflow-x-auto border-t border-[var(--sep)] px-1 pt-[9px] pb-[calc(9px+env(safe-area-inset-bottom))] lg:hidden",
+        // Icon-only, so all eight fit without horizontal scrolling. The base
+        // bottom padding matters: env(safe-area-inset-bottom) is 0 on Android
+        // and older iPhones, which previously left the row sitting ~9px off
+        // the screen edge and awkward to hit.
+        "fixed inset-x-0 bottom-0 z-40 flex items-stretch gap-0.5 border-t border-[var(--sep)] px-2 pt-1.5 pb-[calc(14px+env(safe-area-inset-bottom))] lg:hidden",
         NAV_MATERIAL
       )}
     >
       {NAV_ITEMS.map((item) => {
         const active = isNavItemActive(pathname, item.href);
+        const Icon = item.icon;
         return (
           <Link
             key={item.href}
             href={item.href}
-            className={cn(
-              "shrink-0 px-3 py-1.5 text-[12px] whitespace-nowrap tracking-[-0.005em] transition-colors",
-              active ? "font-[600] text-[var(--accent)]" : "font-[450] text-[var(--fg2)]"
-            )}
+            aria-label={item.label}
+            aria-current={active ? "page" : undefined}
+            title={item.label}
+            // min-h-11 == 44px, Apple's minimum comfortable tap target.
+            className="flex min-h-11 flex-1 items-center justify-center rounded-[10px] transition-colors active:bg-[var(--fill)]"
+            style={{ color: active ? "var(--accent)" : "var(--fg2)" }}
           >
-            {item.short}
+            <Icon size={23} strokeWidth={active ? 2.1 : 1.6} aria-hidden />
           </Link>
         );
       })}
