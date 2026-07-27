@@ -1,8 +1,27 @@
 # Wedding Hub
 
-Private wedding planning app for two. Next.js 16 + Supabase, magic-link auth gated by an email allowlist, RLS-protected data, realtime sync between phones.
+Wedding planning app for two. Next.js 16 + Supabase, realtime sync between phones.
 
 Wedding date is set in `src/lib/config.ts` — edit `WEDDING_DATE` once it's locked.
+
+> ### ⚠️ The app has no sign-in
+>
+> The email login flow was removed in `18361bc`, and the middleware has passed
+> every request straight through ever since. The landing page asks whether
+> you're the bride or the groom, but that's a display preference in
+> `localStorage` — it is not authentication and nothing checks it.
+>
+> Server Components and Server Actions all read and write through the
+> **service-role** Supabase client (`src/lib/supabase/service.ts`), which
+> bypasses RLS entirely, and none of them assert a caller. So **anyone who
+> knows the deployed URL has full read and write access** to guests, budgets,
+> savings and every other table, through the app's own UI.
+>
+> This is a deliberate trade-off for now, not an oversight — but if the URL
+> is ever shared, posted, or guessed, treat everything in the database as
+> public. Options if you want it closed: a shared passphrase in middleware,
+> restoring the magic-link gate (the allowlist code and RLS policies are
+> still in place, see below), or Vercel's deployment password protection.
 
 ---
 
@@ -11,7 +30,7 @@ Wedding date is set in `src/lib/config.ts` — edit `WEDDING_DATE` once it's loc
 End-to-end working pieces:
 
 - App shell: masthead with live countdown, tab nav, footer
-- Auth: `/login` magic-link page → `/auth/callback` → allowlist gate
+- Entry: `/` role picker (bride/groom) → dashboard. `/login` now just redirects to `/`
 - **Dashboard** with stats from all seven feature tables
 - **To-Do** — full CRUD, dialog, realtime
 - **Agenda** — full CRUD, dialog, realtime, optional time + all-day support
@@ -61,7 +80,12 @@ Both should succeed.
 
 This creates: 7 feature tables, the `allowed_emails` table seeded with two placeholders, the `is_allowed()` function, RLS policies on every table, and a realtime publication scoped to `todos`/`agenda`/`budget`/`guests`.
 
-### 4. Update the allowlist
+### 4. Update the allowlist (dormant)
+
+The allowlist and its RLS policies are still in the schema, but nothing
+consults them while sign-in is disabled — server-side reads and writes use the
+service-role key, which bypasses RLS. Keep this accurate anyway, so restoring
+the auth gate is a one-commit job rather than a migration.
 
 Still in the SQL Editor, run:
 
@@ -78,7 +102,10 @@ select * from public.allowed_emails;
 
 You should see exactly two rows with the real addresses.
 
-### 5. Configure auth in Supabase
+### 5. Configure auth in Supabase (only if you restore sign-in)
+
+Skip this while the app is open — no magic links are sent. It's kept here
+because `/auth/callback` still works and would need these settings.
 
 1. **Authentication → URL Configuration**:
    - **Site URL**: `http://localhost:3000` (you'll change this to your Vercel URL after deploying)
@@ -97,6 +124,12 @@ cp .env.local.example .env.local
 Then in Supabase: **Settings → API**.
 - Copy **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`
 - Copy **anon public** key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- Copy **service_role** key → `SUPABASE_SERVICE_ROLE_KEY`
+
+The service-role key is required — every Server Component and Server Action
+uses it. It has no `NEXT_PUBLIC_` prefix and must never get one: it bypasses
+RLS, so shipping it to the browser would hand the whole database to anyone
+who opens devtools.
 
 ### 7. Run the dev server
 
@@ -104,7 +137,7 @@ Then in Supabase: **Settings → API**.
 npm run dev
 ```
 
-Open http://localhost:3000 — you'll be redirected to `/login`. Enter one of your allowlisted emails; click the magic link from your inbox; you'll land on the dashboard.
+Open http://localhost:3000 — pick bride or groom and you'll land on the dashboard. There's no sign-in step.
 
 ---
 
@@ -115,17 +148,23 @@ Open http://localhost:3000 — you'll be redirected to `/login`. Enter one of yo
 3. Under **Environment Variables**, add:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
 4. Deploy. You'll get a `https://wedding-hub-xxx.vercel.app` URL.
-5. Back in Supabase: **Authentication → URL Configuration**:
-   - Update **Site URL** to the prod URL
-   - Add `https://wedding-hub-xxx.vercel.app/auth/callback` to **Redirect URLs**
-6. Try signing in on prod — magic link should now arrive and redirect correctly.
 
-(Once you have a custom domain like `weddinghub.celal.dev`, update Site URL again and add the new callback to Redirect URLs.)
+That URL is the only thing standing between the internet and your data — see
+the warning at the top. If you'd rather not rely on the URL being unguessable,
+Vercel's **Settings → Deployment Protection** puts a password in front of the
+whole deployment without touching the code.
+
+Steps 5–6 of the Supabase auth setup only matter if you restore sign-in: update
+**Site URL** to the prod URL and add `https://wedding-hub-xxx.vercel.app/auth/callback`
+to **Redirect URLs**.
 
 ---
 
 ## Adding / removing allowlist emails later
+
+Only relevant once sign-in is restored — see the note in step 4.
 
 Run in the Supabase SQL Editor:
 
@@ -144,10 +183,10 @@ The change takes effect immediately — `is_allowed()` re-checks on every reques
 ## Architecture, briefly
 
 - **Routes**: everything under `app/(dashboard)/` shares the masthead/tabs/footer chrome via `app/(dashboard)/layout.tsx`. Login + auth callback live outside the group.
-- **Server Components** by default; **Client Components** only where state matters (`todo-client.tsx`, `agenda-client.tsx`, `tab-nav.tsx`, `login-form.tsx`).
+- **Server Components** by default; **Client Components** only where state matters (`todo-client.tsx`, `agenda-client.tsx`, `tab-nav.tsx`, `role-selector.tsx`).
 - **Server Actions** for mutations — see `actions.ts` next to each feature page.
-- **Supabase clients** in three flavours: `client.ts` (browser), `server.ts` (RSC + Server Actions), `middleware.ts` (per-request session refresh + auth gate).
-- **Auth gate** — `middleware.ts` redirects unauthed users to `/login`; the callback then verifies email against `allowed_emails` via the `is_allowed()` RPC.
+- **Supabase clients** in four flavours: `client.ts` (browser, anon key), `server.ts` (cookie-scoped, used only by the dormant auth routes), `service.ts` (service-role — what every page and action actually uses), `middleware.ts` (currently a pass-through).
+- **No auth gate** — `middleware.ts` returns `NextResponse.next()` for every request. `/auth/callback` and its `is_allowed()` allowlist check still exist and still work, but nothing routes users through them. See the warning at the top.
 - **Realtime** is subscribed in the `*-client.tsx` files for `todos` and `agenda`. Local state is updated via the subscription; server actions don't call `revalidatePath` so we don't double-fetch.
 
 ---
@@ -158,13 +197,13 @@ The change takes effect immediately — `is_allowed()` re-checks on every reques
 src/
   app/
     layout.tsx                    # html + fonts + globals
-    page.tsx                      # redirect → /dashboard
+    page.tsx                      # bride/groom role picker → /dashboard
     globals.css                   # palette tokens, base styles, .stat-card etc.
-    login/
-      page.tsx                    # masthead + LoginForm
-      login-form.tsx              # client form, useActionState
-      actions.ts                  # signIn server action
-    auth/
+    login/                        # dormant — page.tsx just redirects to /
+      page.tsx
+      login-form.tsx              # client form, useActionState (unreferenced)
+      actions.ts                  # signIn server action (unreferenced)
+    auth/                         # dormant — reachable, but nothing links here
       callback/route.ts           # exchange code, gate by allowlist
       error/page.tsx              # rejection page
     (dashboard)/
