@@ -2,17 +2,12 @@
 
 import { useState } from "react";
 import { formatMoney, cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Segmented } from "@/components/ui/segmented";
+import { usePageHeader } from "@/components/shell/header-context";
 import { PlannerProvider, usePlanner } from "./use-planner";
 import { ScenarioDetail } from "./scenario-detail";
 import { CompareView } from "./compare-view";
-import {
-  type ScenarioWithStages,
-  SCENARIO_COLORS,
-  scenarioTotal,
-  scenarioNet,
-  totalNights,
-} from "./types";
+import { type ScenarioWithStages, scenarioTotal, scenarioNet, totalNights } from "./types";
 
 export function HoneymoonClient({
   initialScenarios,
@@ -26,10 +21,12 @@ export function HoneymoonClient({
   );
 }
 
+type View = "cards" | "compare";
+
 function PlannerShell() {
   const { scenarios, addScenario, duplicate } = usePlanner();
   const [openId, setOpenId] = useState<string | null>(null);
-  const [comparing, setComparing] = useState(false);
+  const [view, setView] = useState<View>("cards");
 
   const openScenario = scenarios.find((s) => s.id === openId) ?? null;
 
@@ -38,32 +35,24 @@ function PlannerShell() {
     if (id) setOpenId(id);
   };
 
+  usePageHeader("New scenario", handleNew);
+
   return (
-    <section className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-      {/* Header */}
-      <div className="flex items-end justify-between mb-8 pb-5 border-b border-line max-md:flex-col max-md:items-start max-md:gap-4">
-        <div>
-          <h2 className="font-serif text-[42px] font-normal leading-none tracking-[-0.01em] mb-2">
-            The <em>honeymoon</em>
-          </h2>
-          <p className="text-sm text-ink-soft">Build, simulate and compare full trip scenarios stage by stage.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {scenarios.length > 0 && (
-            <Button variant="ghost" onClick={() => setComparing((v) => !v)}>
-              {comparing ? "← Scenarios" : "Compare"}
-            </Button>
-          )}
-          <Button onClick={handleNew}>+ New scenario</Button>
-        </div>
-      </div>
+    <section className="font-apple flex flex-col gap-6 text-[var(--fg)]">
+      {scenarios.length > 0 && (
+        <Segmented
+          options={[{ value: "cards", label: "Scenarios" }, { value: "compare", label: "Compare" }]}
+          value={view}
+          onChange={setView}
+        />
+      )}
 
       {scenarios.length === 0 ? (
         <EmptyState onNew={handleNew} />
-      ) : comparing ? (
+      ) : view === "compare" ? (
         <CompareView scenarios={scenarios} />
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-5">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-4">
           {scenarios.map((s) => (
             <ScenarioCard
               key={s.id}
@@ -86,103 +75,79 @@ function PlannerShell() {
 }
 
 function ScenarioCard({
-  scenario,
-  onOpen,
-  onDuplicate,
+  scenario, onOpen, onDuplicate,
 }: {
   scenario: ScenarioWithStages;
   onOpen: () => void;
   onDuplicate: () => void;
 }) {
   const { removeScenario, selectFinal } = usePlanner();
-  const color = SCENARIO_COLORS[scenario.color] ?? SCENARIO_COLORS.sage;
   const total = scenarioTotal(scenario);
   const net = scenarioNet(scenario);
   const discounted = net < total;
+  const final = scenario.is_selected;
+  const route = scenario.stages.map((st) => st.destination || st.name).join(" · ");
 
   return (
     <article
-      className={cn(
-        "rounded-lg bg-paper border shadow-sm overflow-hidden flex flex-col transition-all hover:shadow-lg",
-        scenario.is_selected ? "border-gold" : "border-line",
-      )}
+      className="flex flex-col overflow-hidden rounded-[12px] bg-[var(--card)]"
+      style={final ? { boxShadow: "inset 0 0 0 1.5px var(--accent)" } : undefined}
     >
-      {/* Color strip + title */}
-      <div className={cn("px-5 pt-4 pb-3 border-b", color.bg, color.border)}>
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <span className={cn("inline-block h-2.5 w-2.5 rounded-full", color.dot)} />
-              {scenario.is_selected && (
-                <span className="text-[11px] uppercase tracking-wider text-gold font-medium">👑 Final plan</span>
-              )}
-            </div>
-            <button onClick={onOpen} className="text-left">
-              <h3 className={cn("font-serif text-[22px] leading-tight hover:underline", color.text)}>{scenario.name}</h3>
-            </button>
-            {scenario.description && (
-              <p className="text-xs text-ink-soft mt-0.5 line-clamp-1">{scenario.description}</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="px-5 py-4 flex-1 flex flex-col gap-3">
-        {/* Stats */}
-        <div className="flex items-center gap-3 text-xs text-ink-soft">
-          <span>{scenario.stages.length} stages</span>
-          <span>·</span>
-          <span>{totalNights(scenario)} nights</span>
-        </div>
-
-        {/* Mini timeline */}
-        {scenario.stages.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1">
-            {scenario.stages.map((st, i) => (
-              <span key={st.id} className="flex items-center gap-1">
-                <span className="rounded-full bg-cream-deep px-2 py-0.5 text-[11px] text-ink">
-                  {st.emoji ? `${st.emoji} ` : ""}{st.name} {st.nights}n
-                </span>
-                {i < scenario.stages.length - 1 && <span className="text-ink-soft/50 text-[10px]">→</span>}
-              </span>
-            ))}
-          </div>
+      <div className="flex flex-1 flex-col gap-3.5 px-5 pt-5 pb-[18px]">
+        {final && (
+          <span className="text-[12px] font-semibold tracking-[0.05em] text-[var(--accent)] uppercase">Chosen</span>
         )}
 
-        {/* Cost */}
-        <div className="mt-auto pt-2">
-          <div className="flex items-baseline justify-between">
-            <span className="text-xs text-ink-soft">Total</span>
-            <span className={cn("text-sm", discounted && "line-through text-ink-soft/60")}>{formatMoney(total)}</span>
-          </div>
+        <div>
+          <button type="button" onClick={onOpen} className="text-left">
+            <h3 className="text-[24px] leading-tight font-[680] tracking-[-0.03em] hover:opacity-70">
+              {scenario.name}
+            </h3>
+          </button>
+          {scenario.description && (
+            <p className="mt-1 text-[15px] text-[var(--fg2)]">{scenario.description}</p>
+          )}
+        </div>
+
+        {route && <div className="text-[15px] text-[var(--fg)]">{route}</div>}
+
+        <div className="text-[14px] text-[var(--fg2)]">
+          {totalNights(scenario)} nights · {scenario.stages.length} stage{scenario.stages.length === 1 ? "" : "s"}
+          {discounted && scenario.promo_code ? ` · ${scenario.promo_code}` : ""}
+        </div>
+
+        <div className="mt-auto flex items-baseline gap-2.5">
+          <span className="text-[28px] font-[680] tracking-[-0.035em] tabular-nums">{formatMoney(net)}</span>
           {discounted && (
-            <div className="flex items-baseline justify-between">
-              <span className="text-xs text-gold uppercase tracking-wider">{scenario.promo_code || "Promo"}</span>
-              <span className="font-serif text-[24px] text-burgundy">{formatMoney(net)}</span>
-            </div>
+            <span className="text-[16px] text-[var(--fg3)] tabular-nums line-through">{formatMoney(total)}</span>
           )}
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-1 border-t border-line px-3 py-2 text-[11px]">
-        <button onClick={onOpen} className="rounded-[2px] px-2 py-1 uppercase tracking-wider text-ink-soft hover:text-ink hover:bg-cream-deep">Edit</button>
-        <button onClick={onDuplicate} className="rounded-[2px] px-2 py-1 uppercase tracking-wider text-ink-soft hover:text-ink hover:bg-cream-deep">Duplicate</button>
+      <div className="flex items-center gap-4 border-t border-[var(--sep)] px-5 py-3">
+        <button type="button" onClick={onOpen} className="text-[15px] text-[var(--accent)] hover:opacity-60">
+          Edit
+        </button>
+        <button type="button" onClick={onDuplicate} className="text-[15px] text-[var(--accent)] hover:opacity-60">
+          Duplicate
+        </button>
         <button
+          type="button"
           onClick={() => { if (confirm(`Delete scenario "${scenario.name}"? This cannot be undone.`)) removeScenario(scenario.id); }}
-          className="rounded-[2px] px-2 py-1 uppercase tracking-wider text-burgundy hover:bg-burgundy/10"
+          className="text-[15px] text-[var(--fg3)] hover:opacity-60"
         >
           Delete
         </button>
         <button
-          onClick={() => { if (!scenario.is_selected && confirm(`Mark "${scenario.name}" as your final honeymoon plan?`)) selectFinal(scenario.id); }}
-          disabled={scenario.is_selected}
+          type="button"
+          disabled={final}
+          onClick={() => { if (confirm(`Mark "${scenario.name}" as your final honeymoon plan?`)) selectFinal(scenario.id); }}
           className={cn(
-            "ml-auto rounded-[2px] px-2.5 py-1 uppercase tracking-wider transition-colors",
-            scenario.is_selected ? "text-gold cursor-default" : "bg-ink text-cream hover:bg-burgundy",
+            "ml-auto text-[15px]",
+            final ? "font-[590] text-[var(--accent)]" : "text-[var(--accent)] hover:opacity-60"
           )}
         >
-          {scenario.is_selected ? "👑 Final" : "Select as final"}
+          {final ? "Chosen" : "Choose"}
         </button>
       </div>
     </article>
@@ -191,11 +156,16 @@ function ScenarioCard({
 
 function EmptyState({ onNew }: { onNew: () => void }) {
   return (
-    <div className="text-center py-20 px-5 text-ink-soft">
-      <div className="text-6xl mb-4 opacity-40">🗺️</div>
-      <p className="font-serif italic text-[26px] text-ink mb-2">No scenarios yet.</p>
-      <p className="text-[13px] mb-6">Create your first trip scenario and start comparing itineraries.</p>
-      <Button onClick={onNew}>+ New scenario</Button>
+    <div className="px-1 py-16 text-center">
+      <p className="text-[17px] text-[var(--fg2)]">No scenarios yet.</p>
+      <p className="mt-2 text-[14px] text-[var(--fg3)]">Create your first trip scenario and start comparing itineraries.</p>
+      <button
+        type="button"
+        onClick={onNew}
+        className="mt-6 text-[15px] text-[var(--accent)] hover:opacity-60"
+      >
+        New scenario
+      </button>
     </div>
   );
 }

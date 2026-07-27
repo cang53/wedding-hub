@@ -8,6 +8,7 @@
 
 // ISO date string — interpreted as midnight in the local timezone.
 export const WEDDING_DATE = "2026-09-05";
+export const WEDDING_LOCATION = "Antwerp";
 
 // Display defaults. Locale is set globally because Celal is in Belgium and
 // fr-BE renders European number formatting (period as thousands separator).

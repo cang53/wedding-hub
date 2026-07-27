@@ -19,19 +19,16 @@ export function RoleSelector() {
 
   if (!role) return null;
 
-  const emoji = role === "bride" ? "👰" : "🤵";
-  const label = role === "bride" ? "Bride" : "Groom";
+  const label = role === "bride" ? "Selver" : "Celal";
 
   return (
-    <div className="flex items-center gap-3">
-      <span className="text-[13px] text-ink-soft">Viewing as</span>
-      <button
-        onClick={handleChangeRole}
-        className="flex items-center gap-2 px-3 py-2 rounded-[4px] border border-line hover:border-burgundy hover:bg-burgundy/5 transition-colors font-sans text-[13px] font-medium"
-      >
-        <span>{emoji}</span>
-        <span>{label}</span>
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={handleChangeRole}
+      title="Change who you're viewing as"
+      className="whitespace-nowrap rounded-[8px] px-2.5 py-2 text-left text-[13px] tracking-[-0.008em] text-[var(--fg2)] transition-colors hover:bg-[var(--fill)]"
+    >
+      Viewing as {label}
+    </button>
   );
 }

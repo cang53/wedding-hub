@@ -60,7 +60,7 @@ describe("TodoClient optimistic updates", () => {
 
     expect(screen.getByText("First")).toBeInTheDocument();
 
-    const deleteButtons = screen.getAllByText("Delete");
+    const deleteButtons = screen.getAllByLabelText("Delete task");
     await userEvent.click(deleteButtons[0]);
 
     // Optimistic remove: item should no longer be in the document
@@ -86,7 +86,7 @@ describe("TodoClient optimistic updates", () => {
 
     render(<TodoClient initialTodos={todos} />);
 
-    const checkbox = screen.getByLabelText("Mark as done") as HTMLInputElement;
+    const checkbox = screen.getByRole("checkbox", { name: "Mark as done" });
     await userEvent.click(checkbox);
 
     expect(checkbox).toBeChecked();

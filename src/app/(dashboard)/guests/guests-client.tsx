@@ -3,9 +3,13 @@
 import { useActionState, useEffect, useState, useTransition } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { GuestRow, GuestRsvp, GuestSide } from "@/types/db";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ListGroup, ListRow } from "@/components/ui/list-group";
+import { Segmented } from "@/components/ui/segmented";
+import { usePageHeader } from "@/components/shell/header-context";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -31,41 +35,46 @@ const RSVP_OPTIONS: { value: GuestRsvp; label: string }[] = [
   { value: "no", label: "No" },
 ];
 
+const SIDE_LABEL: Record<GuestSide, string> = {
+  bride: "Selver's side",
+  groom: "Celal's side",
+  both: "Both sides",
+};
+
+const RSVP_LABEL: Record<GuestRsvp, string> = {
+  yes: "Coming",
+  no: "Declined",
+  pending: "Pending",
+};
+
+const RSVP_DOT: Record<GuestRsvp, string> = {
+  yes: "var(--green)",
+  no: "var(--red)",
+  pending: "var(--amber)",
+};
+
+// Tapping a row's RSVP pill advances it. Starting from the default
+// "pending", one tap gets you to "Coming" — by far the most common outcome.
+const NEXT_RSVP: Record<GuestRsvp, GuestRsvp> = {
+  pending: "yes",
+  yes: "no",
+  no: "pending",
+};
+
 interface Props {
   initialGuests: GuestRow[];
 }
 
-type SortKey = "name" | "side" | "category" | "plus_one" | "rsvp" | "invited";
-type SortDir = "asc" | "desc";
-
-// Rank order for RSVP so sorting follows a meaningful progression.
-const RSVP_RANK: Record<GuestRsvp, number> = { yes: 0, pending: 1, no: 2 };
-
-function compareGuests(a: GuestRow, b: GuestRow, key: SortKey): number {
-  switch (key) {
-    case "name":
-      return a.name.localeCompare(b.name);
-    case "side":
-      return a.side.localeCompare(b.side);
-    case "category":
-      return (a.category ?? "").localeCompare(b.category ?? "");
-    case "plus_one":
-      // Guests with a plus one sort first (true before false).
-      return Number(b.plus_one) - Number(a.plus_one);
-    case "rsvp":
-      return RSVP_RANK[a.rsvp] - RSVP_RANK[b.rsvp];
-    case "invited":
-      return Number(b.invited) - Number(a.invited);
-    default:
-      return 0;
-  }
-}
+type GuestView = "party" | "list";
+/** Ordering *within* each side's column — the split by side is the layout itself. */
+type GroupBy = "none" | "rsvp";
 
 export function GuestsClient({ initialGuests }: Props) {
   const [guests, setGuests] = useState<GuestRow[]>(initialGuests);
-  const [categoryFilter, setCategoryFilter] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [filter, setFilter] = useState("Everyone");
+  const [search, setSearch] = useState("");
+  const [view, setView] = useState<GuestView>("list");
+  const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<GuestRow | null>(null);
   const [, startTransition] = useTransition();
@@ -93,30 +102,17 @@ export function GuestsClient({ initialGuests }: Props) {
   const total = guests.length;
   const yesCount = guests.filter((g) => g.rsvp === "yes").length;
   const noCount = guests.filter((g) => g.rsvp === "no").length;
-  const pending = guests.filter((g) => g.rsvp === "pending").length;
+  const pendingCount = guests.filter((g) => g.rsvp === "pending").length;
   const plusOnes = guests.filter((g) => g.plus_one).length;
 
   const categories = [...new Set(guests.map((g) => g.category).filter(Boolean))] as string[];
+  const filters = ["Everyone", ...categories];
 
-  const filtered = categoryFilter
-    ? guests.filter((g) => g.category === categoryFilter)
-    : guests;
-
-  const sorted = [...filtered].sort((a, b) => {
-    const cmp = compareGuests(a, b, sortKey);
-    // Stable tie-break on name so equal keys keep a predictable order.
-    const resolved = cmp !== 0 ? cmp : a.name.localeCompare(b.name);
-    return sortDir === "asc" ? resolved : -resolved;
-  });
-
-  const handleSort = (key: SortKey) => {
-    if (key === sortKey) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
-  };
+  const searchLower = search.trim().toLowerCase();
+  const visibleGuests = (filter === "Everyone" ? guests : guests.filter((g) => g.category === filter))
+    .filter((g) => !searchLower || g.name.toLowerCase().includes(searchLower))
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const handleDelete = (g: GuestRow) => {
     if (!confirm(`Delete "${g.name}"?`)) return;
@@ -124,157 +120,433 @@ export function GuestsClient({ initialGuests }: Props) {
     startTransition(() => { deleteGuest(g.id); });
   };
 
+  /** Optimistically patch one field and persist via the existing updateGuest
+   *  action, which expects a full FormData payload. */
+  const patchGuest = (g: GuestRow, patch: Partial<GuestRow>) => {
+    const next = { ...g, ...patch };
+    setGuests((prev) => prev.map((x) => (x.id === g.id ? next : x)));
+    const fd = new FormData();
+    fd.set("name", next.name);
+    fd.set("side", next.side);
+    fd.set("category", next.category ?? "");
+    fd.set("plus_one", String(next.plus_one));
+    fd.set("plus_one_name", next.plus_one_name ?? "");
+    fd.set("rsvp", next.rsvp);
+    fd.set("invited", String(next.invited));
+    fd.set("email", next.email ?? "");
+    fd.set("phone", next.phone ?? "");
+    startTransition(() => { updateGuest(g.id, null, fd); });
+  };
+
+  usePageHeader("Add guest", () => { setEditing(null); setDialogOpen(true); });
+
   return (
-    <section className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div className="flex items-end justify-between mb-8 pb-5 border-b border-line max-md:flex-col max-md:items-start max-md:gap-4">
-        <div>
-          <h2 className="font-serif text-[42px] font-normal leading-none tracking-[-0.01em] mb-2">
-            The <em>guests</em>
-          </h2>
-          <p className="text-sm text-ink-soft">Who&rsquo;s celebrating with us.</p>
+    <section className="font-apple flex flex-col gap-6 text-[var(--fg)]">
+      <div className="px-1 py-0.5">
+        <div className="text-[clamp(38px,6vw,54px)] font-bold leading-none tracking-[-0.04em] tabular-nums">
+          {yesCount} of {total + plusOnes} coming
         </div>
-        <Button onClick={() => { setEditing(null); setDialogOpen(true); }}>+ New guest</Button>
-      </div>
-
-      {/* Stats row */}
-      <div className="guest-stats mb-6">
-        <div className="guest-stat">
-          <div className="v">{total + plusOnes}</div>
-          <div className="l">Total invited</div>
+        <div className="mt-3 text-[16px] tracking-[-0.012em] text-[var(--fg2)]">
+          {pendingCount} still to reply · {noCount} declined · {plusOnes} plus one{plusOnes === 1 ? "" : "s"}
         </div>
-        <div className="guest-stat">
-          <div className="v" style={{ color: "var(--sage)" }}>{yesCount}</div>
-          <div className="l">Confirmed</div>
-        </div>
-        <div className="guest-stat">
-          <div className="v" style={{ color: "var(--burgundy)" }}>{noCount}</div>
-          <div className="l">Declined</div>
-        </div>
-        <div className="guest-stat">
-          <div className="v" style={{ color: "var(--gold)" }}>{pending}</div>
-          <div className="l">Pending</div>
-        </div>
-        <div className="guest-stat">
-          <div className="v">{plusOnes}</div>
-          <div className="l">Plus ones</div>
-        </div>
-      </div>
-
-      {/* Category filter chips */}
-      <div className="guest-filters mb-6">
-        <button
-          type="button"
-          className={`filter-chip${categoryFilter === "" ? " active" : ""}`}
-          onClick={() => setCategoryFilter("")}
-        >
-          All
-        </button>
-        {categories.map((c) => (
-          <button
-            key={c}
-            type="button"
-            className={`filter-chip${categoryFilter === c ? " active" : ""}`}
-            onClick={() => setCategoryFilter(c)}
-          >
-            {c}
-          </button>
-        ))}
-      </div>
-
-      {/* Table */}
-      <div className="bg-paper border border-line rounded-[4px] shadow-soft p-2">
-        {guests.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="guest-table w-full">
-              <thead>
-                <tr>
-                  <SortHeader label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="Side" sortKey="side" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="Category" sortKey="category" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="Plus 1" sortKey="plus_one" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="RSVP" sortKey="rsvp" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="Invite" sortKey="invited" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((g) => (
-                  <tr key={g.id}>
-                    <td>
-                      <button
-                        type="button"
-                        className="font-medium text-left hover:text-burgundy transition-colors"
-                        onClick={() => { setEditing(g); setDialogOpen(true); }}
-                      >
-                        {g.name}
-                      </button>
-                    </td>
-                    <td>{g.side}</td>
-                    <td>{g.category ?? "—"}</td>
-                    <td>
-                      {g.plus_one
-                        ? `✓ ${g.plus_one_name ?? "Yes"}`
-                        : "—"}
-                    </td>
-                    <td>
-                      <span className={`rsvp-${g.rsvp}`}>{g.rsvp.toUpperCase()}</span>
-                    </td>
-                    <td>{g.invited ? "✓ Sent" : "—"}</td>
-                    <td>
-                      <Button variant="danger" size="sm" onClick={() => handleDelete(g)}>×</Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {total > 0 && (
+          <div className="mt-[18px] flex h-[6px] max-w-[520px] overflow-hidden rounded-[3px] bg-[var(--fill)]">
+            <div title={`${yesCount} coming`} style={{ width: `${(yesCount / total) * 100}%`, background: "var(--green)" }} />
+            <div title={`${pendingCount} pending`} style={{ width: `${(pendingCount / total) * 100}%`, background: "var(--amber)" }} />
+            <div title={`${noCount} declined`} style={{ width: `${(noCount / total) * 100}%`, background: "var(--red)" }} />
           </div>
         )}
       </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Input
+          type="search"
+          placeholder="Search guests…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="min-w-[200px] flex-1"
+        />
+        <Segmented
+          options={[{ value: "list", label: "List" }, { value: "party", label: "Party" }]}
+          value={view}
+          onChange={setView}
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {filters.map((f) => {
+            const active = filter === f;
+            return (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFilter(f)}
+                className={cn(
+                  "h-[30px] whitespace-nowrap rounded-full px-[13px] text-[14px] tracking-[-0.01em] transition-colors",
+                  active ? "bg-[var(--fg)] font-[560] text-[var(--bg)]" : "bg-[var(--fill)] font-[440] text-[var(--fg)]"
+                )}
+              >
+                {f}
+              </button>
+            );
+          })}
+        </div>
+        {view === "list" && (
+          <Segmented
+            options={[{ value: "none", label: "A–Z" }, { value: "rsvp", label: "RSVP" }]}
+            value={groupBy}
+            onChange={setGroupBy}
+          />
+        )}
+      </div>
+
+      {(searchLower || filter !== "Everyone") && (
+        <div className="flex items-center gap-3 px-1 text-[13px] text-[var(--fg3)]">
+          <span>
+            Showing {visibleGuests.length} of {total}
+          </span>
+          <button
+            type="button"
+            onClick={() => { setSearch(""); setFilter("Everyone"); }}
+            className="text-[var(--accent)] hover:opacity-60"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {view === "party" ? (
+        <GuestParty guests={visibleGuests} onEdit={(g) => { setEditing(g); setDialogOpen(true); }} />
+      ) : visibleGuests.length === 0 ? (
+        <div className="rounded-[12px] bg-[var(--card)] px-1 py-14 text-center">
+          <p className="text-[17px] text-[var(--fg2)]">
+            {searchLower ? `No guests matching “${search.trim()}”.` : "No guests here yet."}
+          </p>
+          <button
+            type="button"
+            onClick={() => { setEditing(null); setDialogOpen(true); }}
+            className="mt-3 text-[15px] text-[var(--accent)] hover:opacity-60"
+          >
+            Add guest
+          </button>
+        </div>
+      ) : (
+        <GuestColumns
+          guests={visibleGuests}
+          groupBy={groupBy}
+          onEdit={(g) => { setEditing(g); setDialogOpen(true); }}
+          onCycleRsvp={(g) => patchGuest(g, { rsvp: NEXT_RSVP[g.rsvp] })}
+          onToggleInvited={(g) => patchGuest(g, { invited: !g.invited })}
+        />
+      )}
 
       <GuestDialog
         open={dialogOpen}
         onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditing(null); }}
         editing={editing}
+        onDelete={handleDelete}
       />
     </section>
   );
 }
 
-function SortHeader({
-  label, sortKey, activeKey, dir, onSort,
-}: {
-  label: string;
-  sortKey: SortKey;
-  activeKey: SortKey;
-  dir: SortDir;
-  onSort: (key: SortKey) => void;
-}) {
-  const active = activeKey === sortKey;
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+function getInitials(name: string): string {
+  return name.split(/\s+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join("").toUpperCase() || "?";
+}
+
+/** Small static initials badge with an RSVP-colored ring, used in list rows. */
+function GuestInitials({ guest, size = 32 }: { guest: GuestRow; size?: number }) {
   return (
-    <th aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}>
-      <button
-        type="button"
-        onClick={() => onSort(sortKey)}
-        className="inline-flex items-center gap-1 uppercase tracking-[0.15em] font-semibold text-[11px] hover:text-burgundy transition-colors"
-      >
-        {label}
-        <span className={`text-[9px] leading-none ${active ? "opacity-100" : "opacity-30"}`}>
-          {active ? (dir === "asc" ? "▲" : "▼") : "▲"}
-        </span>
-      </button>
-    </th>
+    <span
+      className="flex flex-none items-center justify-center rounded-full font-semibold"
+      style={{
+        width: size,
+        height: size,
+        fontSize: size * 0.36,
+        background: "var(--fill)",
+        color: "var(--fg)",
+        boxShadow: `inset 0 0 0 1.5px ${RSVP_DOT[guest.rsvp]}`,
+      }}
+    >
+      {getInitials(guest.name)}
+    </span>
   );
 }
 
-function EmptyState() {
+// ============================================================================
+// List row — the name opens the edit dialog, but the two things you most
+// often want to change (RSVP, whether the invite went out) are one tap
+// each, and stored contact details become actual mailto/tel links so you
+// can chase a reply without leaving the page.
+// ============================================================================
+
+function GuestListRow({
+  guest, onEdit, onCycleRsvp, onToggleInvited, compact = false,
+}: {
+  guest: GuestRow;
+  onEdit: () => void;
+  onCycleRsvp: () => void;
+  onToggleInvited: () => void;
+  /** Side-by-side columns are too narrow for the contact links; the edit
+   *  dialog still shows them. */
+  compact?: boolean;
+}) {
+  // In split-column mode the column header already states the side, so the
+  // row spends that space on category instead.
+  const secondary = [
+    compact ? null : SIDE_LABEL[guest.side],
+    guest.category,
+    guest.plus_one ? `plus ${guest.plus_one_name || "one"}` : null,
+  ].filter(Boolean).join(" · ");
+
   return (
-    <div className="text-center py-15 px-5 text-ink-soft">
-      <div className="empty-ornament mb-3">♥</div>
-      <p className="font-serif italic text-[22px]">No guests yet.</p>
-      <p className="text-[13px] mt-2">Start with the closest family.</p>
+    <ListRow className="group">
+      <button
+        type="button"
+        onClick={onEdit}
+        className="flex min-w-0 flex-1 items-center gap-3.5 text-left transition-opacity hover:opacity-70"
+      >
+        <GuestInitials guest={guest} />
+        <div className="min-w-0">
+          <div className="truncate text-[17px] tracking-[-0.014em]">{guest.name}</div>
+          <div className="mt-0.5 truncate text-[14px] tracking-[-0.008em] text-[var(--fg2)]">{secondary}</div>
+        </div>
+      </button>
+
+      <div className="ml-auto flex flex-none items-center gap-2">
+        {!compact && guest.email && (
+          <a
+            href={`mailto:${guest.email}`}
+            title={guest.email}
+            className="hidden text-[13px] text-[var(--accent)] hover:opacity-60 sm:inline"
+          >
+            Email
+          </a>
+        )}
+        {!compact && guest.phone && (
+          <a
+            href={`tel:${guest.phone}`}
+            title={guest.phone}
+            className="hidden text-[13px] text-[var(--accent)] hover:opacity-60 sm:inline"
+          >
+            Call
+          </a>
+        )}
+
+        {!guest.invited && (
+          <button
+            type="button"
+            onClick={onToggleInvited}
+            title="Mark the invitation as sent"
+            className="rounded-full px-2 py-0.5 text-[12px] whitespace-nowrap transition-opacity hover:opacity-70"
+            style={{ background: "var(--fill)", color: "var(--fg3)" }}
+          >
+            No invite
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={onCycleRsvp}
+          title={`Tap to mark as ${RSVP_LABEL[NEXT_RSVP[guest.rsvp]]}`}
+          className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[14px] whitespace-nowrap transition-opacity hover:opacity-70"
+          style={{ background: "var(--fill)" }}
+        >
+          <span className="h-[7px] w-[7px] rounded-full" style={{ background: RSVP_DOT[guest.rsvp] }} />
+          <span className="tracking-[-0.01em] text-[var(--fg)]">{RSVP_LABEL[guest.rsvp]}</span>
+        </button>
+      </div>
+    </ListRow>
+  );
+}
+
+// ============================================================================
+// List grouping — reorganizes the (already filtered/searched) list into
+// sectioned ListGroups instead of one flat alphabetical run.
+// ============================================================================
+
+function groupGuests(guests: GuestRow[], groupBy: GroupBy): { label?: string; guests: GuestRow[] }[] {
+  if (groupBy === "none") return [{ guests }];
+
+  const order: GuestRsvp[] = ["yes", "pending", "no"];
+  return order
+    .map((rsvp) => ({
+      label: `${RSVP_LABEL[rsvp]} (${guests.filter((g) => g.rsvp === rsvp).length})`,
+      guests: guests.filter((g) => g.rsvp === rsvp),
+    }))
+    .filter((g) => g.guests.length > 0);
+}
+
+interface ColumnHandlers {
+  onEdit: (g: GuestRow) => void;
+  onCycleRsvp: (g: GuestRow) => void;
+  onToggleInvited: (g: GuestRow) => void;
+}
+
+/**
+ * Celal's guests on the left, Selver's on the right, so you can see how the
+ * two halves of the room compare at a glance. Guests marked as belonging to
+ * both sides get a full-width section underneath rather than being counted
+ * twice. Stacks to a single column below lg, where two lists don't fit.
+ */
+function GuestColumns({
+  guests, groupBy, ...handlers
+}: { guests: GuestRow[]; groupBy: GroupBy } & ColumnHandlers) {
+  const groom = guests.filter((g) => g.side === "groom");
+  const bride = guests.filter((g) => g.side === "bride");
+  const both = guests.filter((g) => g.side === "both");
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="grid gap-5 lg:grid-cols-2">
+        <GuestColumn title={SIDE_LABEL.groom} guests={groom} groupBy={groupBy} {...handlers} />
+        <GuestColumn title={SIDE_LABEL.bride} guests={bride} groupBy={groupBy} {...handlers} />
+      </div>
+      {both.length > 0 && (
+        <GuestColumn title={SIDE_LABEL.both} guests={both} groupBy={groupBy} {...handlers} />
+      )}
     </div>
+  );
+}
+
+function GuestColumn({
+  title, guests, groupBy, onEdit, onCycleRsvp, onToggleInvited,
+}: { title: string; guests: GuestRow[]; groupBy: GroupBy } & ColumnHandlers) {
+  const coming = guests.filter((g) => g.rsvp === "yes").length;
+  const pending = guests.filter((g) => g.rsvp === "pending").length;
+  const sections = groupGuests(guests, groupBy);
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2.5">
+      <div className="flex items-baseline justify-between gap-2 px-[18px]">
+        <span className="text-[15px] font-semibold tracking-[-0.016em]">{title}</span>
+        <span className="text-[13px] tabular-nums text-[var(--fg2)]">
+          {guests.length} · {coming} coming{pending > 0 ? ` · ${pending} pending` : ""}
+        </span>
+      </div>
+
+      {guests.length === 0 ? (
+        <ListGroup>
+          <ListRow>
+            <span className="text-[15px] text-[var(--fg2)]">No one on this side yet.</span>
+          </ListRow>
+        </ListGroup>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {sections.map((section) => (
+            <ListGroup key={section.label ?? "all"} label={section.label}>
+              {section.guests.map((g) => (
+                <GuestListRow
+                  key={g.id}
+                  guest={g}
+                  compact
+                  onEdit={() => onEdit(g)}
+                  onCycleRsvp={() => onCycleRsvp(g)}
+                  onToggleInvited={() => onToggleInvited(g)}
+                />
+              ))}
+            </ListGroup>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Party view — a little crowd of avatars per side, standing around and
+// idling. Purely a fun alternate view; the List view stays the practical
+// one for scanning details.
+// ============================================================================
+
+function GuestParty({ guests, onEdit }: { guests: GuestRow[]; onEdit: (g: GuestRow) => void }) {
+  const groomGuests = guests.filter((g) => g.side === "groom");
+  const brideGuests = guests.filter((g) => g.side === "bride");
+  const bothGuests = guests.filter((g) => g.side === "both");
+
+  if (guests.length === 0) {
+    return (
+      <div className="rounded-[16px] bg-[var(--card)] px-1 py-16 text-center">
+        <p className="text-[15px] text-[var(--fg2)]">No guests match this filter.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap gap-4">
+        <GuestBox title="Celal's side" guests={groomGuests} onEdit={onEdit} />
+        <GuestBox title="Selver's side" guests={brideGuests} onEdit={onEdit} />
+      </div>
+      {bothGuests.length > 0 && <GuestBox title="Together" guests={bothGuests} onEdit={onEdit} />}
+    </div>
+  );
+}
+
+function GuestBox({
+  title, guests, onEdit,
+}: {
+  title: string;
+  guests: GuestRow[];
+  onEdit: (g: GuestRow) => void;
+}) {
+  return (
+    <div className="min-w-[240px] flex-1 rounded-[16px] bg-[var(--card)] p-4">
+      <div className="mb-3 flex items-center justify-between px-1">
+        <span className="text-[13px] tracking-[-0.004em] text-[var(--fg2)]">{title}</span>
+        <span className="text-[13px] tabular-nums text-[var(--fg3)]">{guests.length}</span>
+      </div>
+      {guests.length === 0 ? (
+        <div className="py-6 text-center text-[13px] text-[var(--fg3)]">No one here yet.</div>
+      ) : (
+        <div className="flex flex-wrap gap-3 px-1 pb-1">
+          {guests.map((g) => <GuestAvatar key={g.id} guest={g} onClick={() => onEdit(g)} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GuestAvatar({ guest, onClick }: { guest: GuestRow; onClick: () => void }) {
+  const seed = hashString(guest.id);
+  const size = 44 + (seed % 12); // 44-55px, so the crowd isn't a rigid grid
+  const bobDelay = ((seed >> 4) % 30) / 10; // 0-2.9s
+  const bobDuration = 2.6 + ((seed >> 8) % 10) / 10; // 2.6-3.5s
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`${guest.name} · ${RSVP_LABEL[guest.rsvp]}${guest.plus_one ? ` · plus ${guest.plus_one_name || "one"}` : ""}`}
+      className="guest-avatar relative flex items-center justify-center rounded-full font-semibold transition-transform hover:z-10 hover:scale-110"
+      style={{
+        width: size,
+        height: size,
+        fontSize: size * 0.32,
+        background: "var(--fill)",
+        color: "var(--fg)",
+        boxShadow: `inset 0 0 0 2px ${RSVP_DOT[guest.rsvp]}`,
+        "--bob-delay": `${bobDelay}s`,
+        "--bob-duration": `${bobDuration}s`,
+      } as React.CSSProperties}
+    >
+      {getInitials(guest.name)}
+      {guest.plus_one && (
+        <span
+          className="absolute -right-0.5 -bottom-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold"
+          style={{ background: "var(--card)", color: "var(--fg2)", boxShadow: "0 0 0 2px var(--card)" }}
+        >
+          +1
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -303,18 +575,17 @@ function SelectField({
 }
 
 function GuestDialog({
-  open, onOpenChange, editing,
+  open, onOpenChange, editing, onDelete,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   editing: GuestRow | null;
+  onDelete: (g: GuestRow) => void;
 }) {
   const action = editing ? updateGuest.bind(null, editing.id) : createGuest;
   const [state, formAction, pending] = useActionState<{ error?: string; ok?: true } | null, FormData>(action, null);
-  const [plusOne, setPlusOne] = useState(editing?.plus_one ?? false);
 
   useEffect(() => { if (state?.ok) onOpenChange(false); }, [state, onOpenChange]);
-  useEffect(() => { setPlusOne(editing?.plus_one ?? false); }, [editing]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -396,6 +667,16 @@ function GuestDialog({
           {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
 
           <DialogFooter>
+            {editing && (
+              <Button
+                type="button"
+                variant="danger"
+                className="mr-auto"
+                onClick={() => { onDelete(editing); onOpenChange(false); }}
+              >
+                Delete
+              </Button>
+            )}
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
           </DialogFooter>
