@@ -447,14 +447,24 @@ export function LifeBudgetClient({
     : (projection[0]?.fixed ?? 0) + (projection[0]?.purchases ?? 0);
   const heroNet = heroIn - heroOut;
 
-  const barSeries = (activeProjection ?? projection).slice(0, 12).map((p) => ({
-    month: p.month,
-    cumulative: p.cumulative,
-    hasPurchase: monthHasPurchase(purchases, p.month, view === "joint" ? undefined : (view as "groom" | "bride")),
-  }));
-  const cashRangeLabel = barSeries.length > 0
-    ? `${monthLabel(barSeries[0].month)} to ${monthLabel(barSeries[barSeries.length - 1].month)}`
-    : "";
+  const side = view === "joint" ? undefined : (view as "groom" | "bride");
+
+  // Full-horizon trajectory, normalized across the household/per-person shapes.
+  const trajectory: TrajectoryPoint[] = activeProjection
+    ? activeProjection.map((p) => ({
+        month: p.month,
+        cumulative: p.cumulative,
+        inflow: p.totalIn,
+        outflow: p.totalOut,
+        hasPurchase: monthHasPurchase(purchases, p.month, side),
+      }))
+    : projection.map((p) => ({
+        month: p.month,
+        cumulative: p.cumulative,
+        inflow: p.income,
+        outflow: p.fixed + p.purchases,
+        hasPurchase: monthHasPurchase(purchases, p.month, side),
+      }));
 
   const incomeRows = view === "joint" ? income : income.filter((i) => i.person === view || i.person === "both");
   const expenseRows = view === "joint"
@@ -472,6 +482,30 @@ export function LifeBudgetClient({
     const remaining = Math.max(0, Number(p.amount) - Number(p.already_paid ?? 0));
     return view === "joint" ? remaining : remaining * personShare(p.payer, p.payer_groom_pct, view as "groom" | "bride");
   };
+
+  // First-month split, used for the hero's proportional bar. Income is the
+  // whole; costs + purchases + what's left are the parts.
+  const firstMonth = settings.start_month;
+  const monthlyCosts = expenseRows
+    .filter((e) => isActiveInMonth(e.start_month, e.end_month, firstMonth) && !isExternalPayer(e.payer))
+    .reduce((a, e) => a + expenseAmount(e), 0);
+  const monthlyPurchases = purchaseRows
+    .filter((p) => p.scheduled && p.target_month === firstMonth && !isExternalPayer(p.payer))
+    .reduce((a, p) => a + purchaseAmount(p), 0);
+
+  const costCategories = (() => {
+    const map = new Map<string, number>();
+    expenseRows
+      .filter((e) => isActiveInMonth(e.start_month, e.end_month, firstMonth) && !isExternalPayer(e.payer))
+      .forEach((e) => {
+        const key = e.category ?? "Other";
+        map.set(key, (map.get(key) ?? 0) + expenseAmount(e));
+      });
+    return [...map.entries()]
+      .map(([label, amount]) => ({ label, amount }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 7);
+  })();
 
   usePageHeader("Add line", () => setExpenseDialog({ open: true, editing: null }));
 
@@ -516,17 +550,53 @@ export function LifeBudgetClient({
       ) : (
         <>
           <div className="px-1 py-0.5">
-            <div className="text-[clamp(38px,6vw,54px)] leading-none font-bold tracking-[-0.04em] tabular-nums">
+            <div
+              className="text-[clamp(38px,6vw,54px)] leading-none font-bold tracking-[-0.04em] tabular-nums"
+              style={heroNet < 0 ? { color: "var(--red)" } : undefined}
+            >
               {formatMoney(heroNet)} left over
             </div>
             <div className="mt-3 text-[16px] tracking-[-0.012em] text-[var(--fg2)]">
               {formatMoney(heroIn)} in · {formatMoney(heroOut)} out, every month
             </div>
+
+            {/* Where each month's income goes, proportionally */}
+            {heroIn > 0 && (
+              <>
+                <div className="mt-[18px] flex h-[8px] max-w-[560px] overflow-hidden rounded-[4px] bg-[var(--fill)]">
+                  <div
+                    title={`${formatMoney(monthlyCosts)} recurring costs`}
+                    style={{ width: `${Math.min(100, (monthlyCosts / heroIn) * 100)}%`, background: "var(--fg2)" }}
+                  />
+                  <div
+                    title={`${formatMoney(monthlyPurchases)} purchases`}
+                    style={{ width: `${Math.min(100, (monthlyPurchases / heroIn) * 100)}%`, background: "var(--amber)" }}
+                  />
+                  <div
+                    title={`${formatMoney(Math.max(0, heroNet))} left over`}
+                    style={{ width: `${Math.max(0, (heroNet / heroIn) * 100)}%`, background: "var(--green)" }}
+                  />
+                </div>
+                <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-[var(--fg2)]">
+                  <LegendDot color="var(--fg2)" label={`Costs ${formatMoney(monthlyCosts)}`} />
+                  {monthlyPurchases > 0 && (
+                    <LegendDot color="var(--amber)" label={`Purchases ${formatMoney(monthlyPurchases)}`} />
+                  )}
+                  <LegendDot color="var(--green)" label={`Left ${formatMoney(Math.max(0, heroNet))}`} />
+                </div>
+              </>
+            )}
           </div>
 
-          <ListGroup label={`Projected cash · ${cashRangeLabel}`}>
+          <ListGroup label="Projected cash">
             <div className="px-[18px] pt-5 pb-[18px]">
-              <CashBars series={barSeries} />
+              <CashTrajectory series={trajectory} />
+            </div>
+          </ListGroup>
+
+          <ListGroup label="Where the money goes each month">
+            <div className="px-[18px] pt-4 pb-[18px]">
+              <CostsByCategory rows={costCategories} />
             </div>
           </ListGroup>
 
@@ -821,38 +891,173 @@ export function LifeBudgetClient({
 // Display helpers
 // ============================================================================
 
-/** The 12-bar cash projection chart from the design handoff: bar height is
- *  cumulative cash for the month, accent-colored when a purchase lands then. */
-function CashBars({ series }: { series: { month: string; cumulative: number; hasPurchase: boolean }[] }) {
-  const max = Math.max(1, ...series.map((s) => s.cumulative));
+type TrajectoryPoint = {
+  month: string;
+  cumulative: number;
+  inflow: number;
+  outflow: number;
+  hasPurchase: boolean;
+};
+
+/**
+ * Cash trajectory across the whole horizon: an area+line curve of the
+ * projected balance, with a dashed zero line when it dips negative and
+ * accent markers on months carrying a planned purchase. Hovering or
+ * tapping a month swaps the header readout to that month's detail, so the
+ * chart answers "what happens in March?" without a separate table.
+ */
+function CashTrajectory({ series }: { series: TrajectoryPoint[] }) {
+  const [activeIdx, setActiveIdx] = useState<number | null>(null);
+
+  if (series.length === 0) {
+    return <div className="py-8 text-center text-[14px] text-[var(--fg3)]">Nothing to project yet.</div>;
+  }
+
+  const W = 800;
+  const H = 170;
+  const PAD = 20;
+
+  const values = series.map((p) => p.cumulative);
+  const minV = Math.min(0, ...values);
+  const maxV = Math.max(0, ...values);
+  const range = Math.max(1, maxV - minV);
+
+  const xAt = (i: number) => (series.length === 1 ? W / 2 : (i / (series.length - 1)) * W);
+  const yAt = (v: number) => PAD + (1 - (v - minV) / range) * (H - PAD * 2);
+  const zeroY = yAt(0);
+
+  const linePoints = series.map((p, i) => `${xAt(i)},${yAt(p.cumulative)}`).join(" ");
+  const areaPath = `M ${xAt(0)},${zeroY} L ${series.map((p, i) => `${xAt(i)},${yAt(p.cumulative)}`).join(" L ")} L ${xAt(series.length - 1)},${zeroY} Z`;
+
   const last = series[series.length - 1];
+  const lowest = series.reduce((m, p) => (p.cumulative < m.cumulative ? p : m), series[0]);
+  const active = activeIdx !== null ? series[activeIdx] : null;
+  const endsNegative = last.cumulative < 0;
+
   return (
     <div>
-      <div className="flex h-[150px] items-end gap-[clamp(3px,0.9vw,9px)]">
-        {series.map((s) => (
-          <div
-            key={s.month}
-            title={formatMoney(s.cumulative)}
-            className="min-h-[4px] flex-1 rounded-[2px]"
-            style={{
-              height: `${Math.max(0, (s.cumulative / max) * 100)}%`,
-              background: s.hasPurchase ? "var(--accent)" : "var(--fill)",
-            }}
-          />
-        ))}
-      </div>
-      <div className="mt-2.5 flex gap-[clamp(3px,0.9vw,9px)] border-t border-[var(--sep)] pt-2">
-        {series.map((s) => (
-          <div key={s.month} className="flex-1 text-center text-[11px] text-[var(--fg3)]">
-            {monthToDate(s.month).toLocaleDateString("en-GB", { month: "short" }).charAt(0)}
+      {/* Header readout — the hovered month, or the horizon summary at rest */}
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <div>
+          <div className="text-[11px] tracking-[0.1em] text-[var(--fg3)] uppercase">
+            {active ? monthLabel(active.month) : "Ends at"}
           </div>
-        ))}
-      </div>
-      {last && (
-        <div className="mt-3 text-[13px] text-[var(--fg2)]">
-          Ends at {formatMoney(last.cumulative)}. Highlighted months carry a planned purchase.
+          <div
+            className="text-[22px] font-semibold tabular-nums"
+            style={{ color: (active ?? last).cumulative >= 0 ? "var(--fg)" : "var(--red)" }}
+          >
+            {formatMoney((active ?? last).cumulative)}
+          </div>
         </div>
-      )}
+        <div className="text-right text-[13px] text-[var(--fg2)]">
+          {active ? (
+            <>
+              <span style={{ color: "var(--green)" }}>+{formatMoney(active.inflow)}</span>
+              {" in · "}
+              <span>−{formatMoney(active.outflow)}</span>
+              {" out"}
+              {active.hasPurchase && <span style={{ color: "var(--accent)" }}> · purchase</span>}
+            </>
+          ) : (
+            <>
+              Lowest {formatMoney(lowest.cumulative)} in {monthLabel(lowest.month)}
+            </>
+          )}
+        </div>
+      </div>
+
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="block w-full"
+        style={{ height: 160 }}
+        preserveAspectRatio="none"
+        onMouseLeave={() => setActiveIdx(null)}
+      >
+        {minV < 0 && (
+          <line x1={0} y1={zeroY} x2={W} y2={zeroY} stroke="var(--sep)" strokeDasharray="4 4" strokeWidth={1} />
+        )}
+        <path d={areaPath} fill="var(--fill)" stroke="none" />
+        <polyline
+          points={linePoints}
+          fill="none"
+          stroke={endsNegative ? "var(--red)" : "var(--accent)"}
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {series.map((p, i) => {
+          const isActive = activeIdx === i;
+          const show = p.hasPurchase || isActive;
+          return (
+            <g
+              key={p.month}
+              onMouseEnter={() => setActiveIdx(i)}
+              onClick={() => setActiveIdx(isActive ? null : i)}
+              style={{ cursor: "pointer" }}
+            >
+              {/* Generous invisible hit area — the visible dots are tiny */}
+              <rect x={xAt(i) - W / series.length / 2} y={0} width={W / series.length} height={H} fill="transparent" />
+              {show && (
+                <circle
+                  cx={xAt(i)}
+                  cy={yAt(p.cumulative)}
+                  r={isActive ? 5 : 3.5}
+                  fill={p.hasPurchase ? "var(--accent)" : "var(--fg2)"}
+                  stroke="var(--card)"
+                  strokeWidth={1.5}
+                />
+              )}
+            </g>
+          );
+        })}
+      </svg>
+
+      <div className="mt-2 flex justify-between border-t border-[var(--sep)] pt-2 text-[11px] text-[var(--fg3)]">
+        <span>{monthLabel(series[0].month)}</span>
+        <span>{monthLabel(last.month)}</span>
+      </div>
+    </div>
+  );
+}
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="h-[7px] w-[7px] rounded-full" style={{ background: color }} />
+      {label}
+    </span>
+  );
+}
+
+/** Where the monthly money actually goes — top categories, proportionally. */
+function CostsByCategory({ rows }: { rows: { label: string; amount: number }[] }) {
+  if (rows.length === 0) {
+    return <div className="py-6 text-center text-[14px] text-[var(--fg3)]">No recurring costs yet.</div>;
+  }
+  const max = Math.max(...rows.map((r) => r.amount), 1);
+  const total = rows.reduce((a, r) => a + r.amount, 0);
+
+  return (
+    <div className="flex flex-col gap-3">
+      {rows.map((r) => (
+        <div key={r.label}>
+          <div className="mb-1 flex items-baseline justify-between gap-3">
+            <span className="truncate text-[15px] tracking-[-0.01em]">{r.label}</span>
+            <span className="shrink-0 text-[15px] tabular-nums text-[var(--fg2)]">
+              {formatMoney(r.amount)}
+              <span className="ml-1.5 text-[13px] text-[var(--fg3)]">
+                {total > 0 ? `${Math.round((r.amount / total) * 100)}%` : ""}
+              </span>
+            </span>
+          </div>
+          <div className="h-[6px] overflow-hidden rounded-[3px] bg-[var(--fill)]">
+            <div
+              className="h-full rounded-[3px]"
+              style={{ width: `${(r.amount / max) * 100}%`, background: "var(--fg2)" }}
+            />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

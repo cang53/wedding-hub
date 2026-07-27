@@ -5,6 +5,7 @@ import { WEDDING_DATE, WEDDING_LOCATION } from "@/lib/config";
 import { daysUntil, formatDateLong, formatDateShort, formatTime } from "@/lib/utils";
 import type { TodoPriority } from "@/types/db";
 import { ListGroup, ListRow } from "@/components/ui/list-group";
+import { ProgressRing } from "@/components/ui/progress-ring";
 import { toggleTodo } from "../todo/actions";
 
 interface AgendaItem {
@@ -21,8 +22,15 @@ interface TaskItem {
   priority: TodoPriority;
 }
 
+interface RingStat {
+  value: number;
+  total: number;
+  caption: string;
+}
+
 interface Props {
-  standing: { label: string; value: string }[];
+  rings: { guests: RingStat; tasks: RingStat; budget: RingStat };
+  facts: { label: string; value: string }[];
   upcoming: AgendaItem[];
   visibleTasks: TaskItem[];
   otherOpenCount: number;
@@ -34,11 +42,22 @@ const PRIORITY_COLOR: Record<TodoPriority, string> = {
   low: "var(--fg3)",
 };
 
-export function OverviewClient({ standing, upcoming, visibleTasks, otherOpenCount }: Props) {
+/** "Today" / "Tomorrow" / "In 4 days" / "12 Aug" — a countdown reads more
+ *  urgently than a bare date for anything happening this week. */
+function relativeDay(iso: string): string {
+  const days = daysUntil(iso);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Tomorrow";
+  if (days <= 7) return `In ${days} days`;
+  return formatDateShort(iso);
+}
+
+export function OverviewClient({ rings, facts, upcoming, visibleTasks, otherOpenCount }: Props) {
   const [done, setDone] = useState<Record<string, boolean>>({});
   const [, startTransition] = useTransition();
 
   const days = Math.max(0, daysUntil(WEDDING_DATE));
+  const weeks = Math.floor(days / 7);
   const openCount = otherOpenCount + visibleTasks.filter((t) => !done[t.id]).length;
   const tasksLabel = openCount === 0 ? "All done" : `${openCount} task${openCount === 1 ? "" : "s"} open`;
 
@@ -61,14 +80,40 @@ export function OverviewClient({ standing, upcoming, visibleTasks, otherOpenCoun
         </div>
         <div className="mt-3.5 text-[16px] tracking-[-0.012em] text-[var(--fg2)]">
           {formatDateLong(WEDDING_DATE).replace(",", "")} · {WEDDING_LOCATION}
+          {weeks > 0 && <span className="text-[var(--fg3)]"> · about {weeks} weeks</span>}
         </div>
       </div>
 
+      {/* Live progress on the three things that actually have a finish line */}
+      <div className="grid grid-cols-3 gap-3 rounded-[12px] bg-[var(--card)] px-4 py-6 max-sm:grid-cols-1 max-sm:gap-6">
+        <ProgressRing
+          value={rings.guests.value}
+          total={rings.guests.total}
+          label="RSVPs in"
+          caption={rings.guests.caption}
+          color="var(--green)"
+        />
+        <ProgressRing
+          value={rings.tasks.value}
+          total={rings.tasks.total}
+          label="Tasks done"
+          caption={rings.tasks.caption}
+          color="var(--accent)"
+        />
+        <ProgressRing
+          value={rings.budget.value}
+          total={rings.budget.total}
+          label="Budget paid"
+          caption={rings.budget.caption}
+          color="var(--amber)"
+        />
+      </div>
+
       <ListGroup label="Where things stand">
-        {standing.map((s) => (
-          <ListRow key={s.label}>
-            <span className="text-[17px] tracking-[-0.014em]">{s.label}</span>
-            <span className="ml-auto text-[17px] tracking-[-0.014em] text-[var(--fg2)] tabular-nums">{s.value}</span>
+        {facts.map((f) => (
+          <ListRow key={f.label}>
+            <span className="text-[17px] tracking-[-0.014em]">{f.label}</span>
+            <span className="ml-auto text-[17px] tracking-[-0.014em] text-[var(--fg2)] tabular-nums">{f.value}</span>
           </ListRow>
         ))}
       </ListGroup>
@@ -81,14 +126,18 @@ export function OverviewClient({ standing, upcoming, visibleTasks, otherOpenCoun
         ) : (
           upcoming.map((e) => {
             const sub = [e.location, !e.all_day && formatTime(e.date)].filter(Boolean).join(" · ");
+            const soon = daysUntil(e.date) <= 7;
             return (
               <ListRow key={e.id}>
                 <div className="min-w-0 flex-1">
                   <div className="text-[17px] tracking-[-0.014em]">{e.title}</div>
                   {sub && <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">{sub}</div>}
                 </div>
-                <span className="ml-auto text-[15px] whitespace-nowrap text-[var(--fg2)]">
-                  {formatDateShort(e.date)}
+                <span
+                  className="ml-auto text-[15px] whitespace-nowrap"
+                  style={{ color: soon ? "var(--accent)" : "var(--fg2)" }}
+                >
+                  {relativeDay(e.date)}
                 </span>
               </ListRow>
             );

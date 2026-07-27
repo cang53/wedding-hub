@@ -39,15 +39,14 @@ export default async function DashboardPage() {
   const guests = (guestsRes.data ?? []) as GuestStat[];
   const scenarios = (scenariosRes.data ?? []) as ScenarioStat[];
 
-  const remaining = budget.reduce((sum, b) => sum + Number(b.estimated ?? 0), 0)
-    - budget.reduce((sum, b) => sum + Number(b.paid ?? 0), 0);
+  const totalEstimated = budget.reduce((sum, b) => sum + Number(b.estimated ?? 0), 0);
+  const totalPaid = budget.reduce((sum, b) => sum + Number(b.paid ?? 0), 0);
 
-  const yes = guests.filter((g) => g.rsvp === "yes").length;
+  const guestsYes = guests.filter((g) => g.rsvp === "yes").length;
+  const guestsReplied = guests.filter((g) => g.rsvp === "yes" || g.rsvp === "no").length;
   const plusOnes = guests.filter((g) => g.plus_one).length;
-  const guestTotal = guests.length + plusOnes;
 
-  const chosenScenarios = scenarios.filter((s) => s.is_selected).length;
-
+  const tasksDone = todos.filter((t) => t.done).length;
   const openTasks = todos.filter((t) => !t.done);
   const visibleTasks = openTasks
     .slice()
@@ -55,18 +54,29 @@ export default async function DashboardPage() {
     .slice(0, 5)
     .map((t) => ({ id: t.id, text: t.text, priority: t.priority }));
 
-  const standing = [
-    { label: "Budget", value: `${formatMoney(remaining)} left` },
-    { label: "Guests", value: `${yes} of ${guestTotal} confirmed` },
-    {
-      label: "Honeymoon",
-      value: `${scenarios.length} scenario${scenarios.length === 1 ? "" : "s"}, ${chosenScenarios} chosen`,
-    },
-  ];
+  const chosenScenarios = scenarios.filter((s) => s.is_selected).length;
 
   return (
     <OverviewClient
-      standing={standing}
+      rings={{
+        guests: { value: guestsReplied, total: guests.length, caption: `${guestsReplied} of ${guests.length} replied` },
+        tasks: { value: tasksDone, total: todos.length, caption: `${tasksDone} of ${todos.length} done` },
+        budget: {
+          value: totalPaid,
+          total: totalEstimated,
+          caption: `${formatMoney(totalPaid)} of ${formatMoney(totalEstimated)}`,
+        },
+      }}
+      facts={[
+        { label: "Coming so far", value: `${guestsYes}${plusOnes > 0 ? ` · ${plusOnes} plus one${plusOnes === 1 ? "" : "s"}` : ""}` },
+        { label: "Still to pay", value: formatMoney(Math.max(0, totalEstimated - totalPaid)) },
+        {
+          label: "Honeymoon",
+          value: scenarios.length === 0
+            ? "No scenarios yet"
+            : `${scenarios.length} scenario${scenarios.length === 1 ? "" : "s"}, ${chosenScenarios} chosen`,
+        },
+      ]}
       upcoming={upcoming}
       visibleTasks={visibleTasks}
       otherOpenCount={openTasks.length - visibleTasks.length}
