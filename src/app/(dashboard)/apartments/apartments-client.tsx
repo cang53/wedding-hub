@@ -7,6 +7,8 @@ import { formatMoney } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ListGroup, ListRow } from "@/components/ui/list-group";
+import { usePageHeader } from "@/components/shell/header-context";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -22,6 +24,10 @@ const STATUS_OPTIONS: { value: ApartmentStatus; label: string }[] = [
   { value: "applied", label: "Applied" },
   { value: "rejected", label: "Rejected" },
 ];
+
+const STATUS_LABEL: Record<ApartmentStatus, string> = {
+  interested: "Interested", visited: "Visited", applied: "Applied", rejected: "Rejected",
+};
 
 interface Props {
   initialItems: ApartmentRow[];
@@ -69,77 +75,66 @@ export function ApartmentsClient({ initialItems }: Props) {
     });
   };
 
-  return (
-    <section className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div className="flex items-end justify-between mb-8 pb-5 border-b border-line max-md:flex-col max-md:items-start max-md:gap-4">
-        <div>
-          <h2 className="font-serif text-[42px] font-normal leading-none tracking-[-0.01em] mb-2">
-            Our <em>future home</em>
-          </h2>
-          <p className="text-sm text-ink-soft">Apartments to consider before September.</p>
-        </div>
-        <Button onClick={() => { setEditing(null); setDialogOpen(true); }}>+ New listing</Button>
-      </div>
+  usePageHeader("New listing", () => { setEditing(null); setDialogOpen(true); });
 
+  return (
+    <section className="font-apple flex flex-col gap-6 text-[var(--fg)]">
       <ActionError message={actionError} onDismiss={() => setActionError(null)} />
 
       {items.length === 0 ? (
-        <EmptyState />
+        <div className="px-1 py-16 text-center">
+          <p className="text-[17px] text-[var(--fg2)]">No listings yet.</p>
+          <p className="mt-2 text-[14px] text-[var(--fg3)]">Add the apartments you&rsquo;re considering.</p>
+        </div>
       ) : (
-        <div>
-          {sorted.map((a) => (
-            <div key={a.id} className="apt-card mb-3.5">
-              <div>
-                <h4 className="font-serif text-2xl font-medium mb-1">
+        <ListGroup>
+          {sorted.map((a) => {
+            const specs = [
+              a.rent != null ? `${formatMoney(a.rent)}/mo` : null,
+              a.size != null ? `${a.size} m²` : null,
+              a.bedrooms != null ? `${a.bedrooms} bed` : null,
+              a.charges != null ? `+${formatMoney(a.charges)} charges` : null,
+            ].filter(Boolean).join(" · ");
+            return (
+              <ListRow key={a.id} align="start">
+                <div className="min-w-0 flex-1">
                   {a.link ? (
-                    <a href={a.link} target="_blank" rel="noopener noreferrer" className="text-burgundy no-underline hover:underline">
+                    <a href={a.link} target="_blank" rel="noopener noreferrer" className="text-[17px] tracking-[-0.014em] text-[var(--accent)] hover:opacity-60">
                       {a.title}
                     </a>
                   ) : (
-                    <button
-                      type="button"
-                      className="text-left hover:text-burgundy transition-colors"
-                      onClick={() => { setEditing(a); setDialogOpen(true); }}
-                    >
-                      {a.title}
+                    <div className="text-[17px] tracking-[-0.014em]">{a.title}</div>
+                  )}
+                  <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">
+                    {[a.address, specs].filter(Boolean).join(" · ")}
+                  </div>
+                  {(a.pros || a.cons) && (
+                    <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg3)]">
+                      {[a.pros ? `+ ${a.pros}` : null, a.cons ? `− ${a.cons}` : null].filter(Boolean).join("  ")}
+                    </div>
+                  )}
+                </div>
+                <div className="ml-auto flex flex-none flex-col items-end gap-1.5">
+                  <div className="flex items-center gap-2 whitespace-nowrap">
+                    <span className="text-[14px] text-[var(--fg2)]">{STATUS_LABEL[a.status]}</span>
+                    <span className="text-[13px] tracking-[0.05em] text-[var(--accent)]">
+                      {"★".repeat(a.rating ?? 0)}
+                      <span className="text-[var(--fg3)]">{"★".repeat(5 - (a.rating ?? 0))}</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 whitespace-nowrap">
+                    <button type="button" onClick={() => { setEditing(a); setDialogOpen(true); }} className="text-[15px] text-[var(--accent)] hover:opacity-60">
+                      Edit
                     </button>
-                  )}
-                </h4>
-                {a.address && <div className="addr">{a.address}</div>}
-                <div className="specs">
-                  {a.rent != null && (
-                    <span><strong className="font-serif text-lg text-burgundy font-medium">{formatMoney(a.rent)}</strong>/mo</span>
-                  )}
-                  {a.size != null && (
-                    <span><strong className="font-serif text-lg text-burgundy font-medium">{a.size}</strong> m²</span>
-                  )}
-                  {a.bedrooms != null && (
-                    <span><strong className="font-serif text-lg text-burgundy font-medium">{a.bedrooms}</strong> bed</span>
-                  )}
-                  {a.charges != null && (
-                    <span>+{formatMoney(a.charges)} charges</span>
-                  )}
+                    <button type="button" onClick={() => handleDelete(a)} className="text-[15px] text-[var(--fg3)] hover:opacity-60">
+                      Delete
+                    </button>
+                  </div>
                 </div>
-                {a.pros && <div className="pros">+ {a.pros}</div>}
-                {a.cons && <div className="cons">– {a.cons}</div>}
-              </div>
-              <div className="right">
-                <span className={`apt-status apt-status-${a.status}`}>{a.status}</span>
-                <div className="apt-rating" style={{ color: "var(--gold)", fontSize: "16px", letterSpacing: "2px" }}>
-                  {"★".repeat(a.rating ?? 0)}{"☆".repeat(5 - (a.rating ?? 0))}
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => { setEditing(a); setDialogOpen(true); }}
-                >
-                  Edit
-                </Button>
-                <Button variant="danger" size="sm" onClick={() => handleDelete(a)}>Delete</Button>
-              </div>
-            </div>
-          ))}
-        </div>
+              </ListRow>
+            );
+          })}
+        </ListGroup>
       )}
 
       <ApartmentDialog
@@ -148,16 +143,6 @@ export function ApartmentsClient({ initialItems }: Props) {
         editing={editing}
       />
     </section>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="text-center py-15 px-5 text-ink-soft">
-      <div className="empty-ornament mb-3">⌂</div>
-      <p className="font-serif italic text-[22px]">No listings yet.</p>
-      <p className="text-[13px] mt-2">Add the apartments you&rsquo;re considering.</p>
-    </div>
   );
 }
 

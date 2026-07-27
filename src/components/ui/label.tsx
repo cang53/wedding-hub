@@ -4,10 +4,6 @@ import * as React from "react";
 import * as LabelPrimitive from "@radix-ui/react-label";
 import { cn } from "@/lib/utils";
 
-/**
- * Label — uppercase, letter-spaced, ink-soft.
- * Matches `.form-row label` in the prototype.
- */
 const Label = React.forwardRef<
   React.ElementRef<typeof LabelPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof LabelPrimitive.Root>
@@ -15,7 +11,7 @@ const Label = React.forwardRef<
   <LabelPrimitive.Root
     ref={ref}
     className={cn(
-      "text-[11px] font-medium uppercase tracking-[0.15em] text-ink-soft peer-disabled:cursor-not-allowed peer-disabled:opacity-70",
+      "font-apple text-[17px] tracking-[-0.014em] text-[var(--fg)] peer-disabled:cursor-not-allowed peer-disabled:opacity-70",
       className
     )}
     {...props}

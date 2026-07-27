@@ -8,7 +8,8 @@ import { formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+import { ListGroup, ListRow } from "@/components/ui/list-group";
+import { usePageHeader } from "@/components/shell/header-context";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +29,9 @@ import { ActionError } from "@/components/action-error";
 import { createTodo, deleteTodo, toggleTodo, updateTodo } from "./actions";
 
 const PRIORITY_ORDER: Record<TodoPriority, number> = { high: 0, medium: 1, low: 2 };
+const PRIORITY_COLOR: Record<TodoPriority, string> = {
+  high: "var(--accent)", medium: "var(--fg2)", low: "var(--fg3)",
+};
 
 const CATEGORY_OPTIONS: { value: TodoCategory; label: string }[] = [
   { value: "wedding", label: "Wedding" },
@@ -54,43 +58,30 @@ export function TodoClient({ initialTodos }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TodoRow | null>(null);
 
-  // ---- Realtime subscription -----------------------------------------------
-
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
     const channel = supabase
       .channel("todos:list")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "todos" },
-        (payload) => {
-          if (payload.eventType === "INSERT") {
-            const row = payload.new as TodoRow;
-            setTodos((prev) =>
-              prev.some((t) => t.id === row.id) ? prev : [row, ...prev]
-            );
-          } else if (payload.eventType === "UPDATE") {
-            const row = payload.new as TodoRow;
-            setTodos((prev) => prev.map((t) => (t.id === row.id ? row : t)));
-          } else if (payload.eventType === "DELETE") {
-            const row = payload.old as TodoRow;
-            setTodos((prev) => prev.filter((t) => t.id !== row.id));
-          }
+      .on("postgres_changes", { event: "*", schema: "public", table: "todos" }, (payload) => {
+        if (payload.eventType === "INSERT") {
+          const row = payload.new as TodoRow;
+          setTodos((prev) => prev.some((t) => t.id === row.id) ? prev : [row, ...prev]);
+        } else if (payload.eventType === "UPDATE") {
+          const row = payload.new as TodoRow;
+          setTodos((prev) => prev.map((t) => (t.id === row.id ? row : t)));
+        } else if (payload.eventType === "DELETE") {
+          const row = payload.old as TodoRow;
+          setTodos((prev) => prev.filter((t) => t.id !== row.id));
         }
-      )
+      })
       .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, []);
-
-  // ---- Filtering / sorting --------------------------------------------------
 
   const filtered = useMemo(() => {
     return todos
       .filter((t) => {
-        if (search && !t.text.toLowerCase().includes(search.toLowerCase()))
-          return false;
+        if (search && !t.text.toLowerCase().includes(search.toLowerCase())) return false;
         if (categoryFilter !== "all" && t.category !== categoryFilter) return false;
         if (statusFilter === "open" && t.done) return false;
         if (statusFilter === "done" && !t.done) return false;
@@ -101,8 +92,6 @@ export function TodoClient({ initialTodos }: Props) {
         return (PRIORITY_ORDER[a.priority] ?? 3) - (PRIORITY_ORDER[b.priority] ?? 3);
       });
   }, [todos, search, categoryFilter, statusFilter]);
-
-  // ---- Actions --------------------------------------------------------------
 
   const [, startTransition] = useTransition();
   const [actionError, setActionError] = useState<string | null>(null);
@@ -135,57 +124,32 @@ export function TodoClient({ initialTodos }: Props) {
     });
   };
 
-  const handleEdit = (todo: TodoRow) => {
-    setEditing(todo);
-    setDialogOpen(true);
-  };
+  const handleEdit = (todo: TodoRow) => { setEditing(todo); setDialogOpen(true); };
+  const handleNew = () => { setEditing(null); setDialogOpen(true); };
 
-  const handleNew = () => {
-    setEditing(null);
-    setDialogOpen(true);
-  };
+  usePageHeader("New task", handleNew);
 
   return (
-    <section className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-      {/* Panel header */}
-      <div className="flex items-end justify-between mb-8 pb-5 border-b border-line max-md:flex-col max-md:items-start max-md:gap-4">
-        <div>
-          <h2 className="font-serif text-[42px] font-normal leading-none tracking-[-0.01em] mb-2">
-            To-<em>do</em>
-          </h2>
-          <p className="text-sm text-ink-soft">What&rsquo;s next on our list.</p>
-        </div>
-        <Button onClick={handleNew}>+ New task</Button>
-      </div>
-
+    <section className="font-apple flex flex-col gap-6 text-[var(--fg)]">
       <ActionError message={actionError} onDismiss={() => setActionError(null)} />
 
-      {/* Toolbar */}
-      <div className="flex flex-wrap gap-3 items-center mb-6">
+      <div className="flex flex-wrap items-center gap-3">
         <Input
           type="search"
           placeholder="Search tasks…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 min-w-[240px]"
+          className="min-w-[240px] flex-1"
         />
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-[170px]">
-            <SelectValue placeholder="All categories" />
-          </SelectTrigger>
+          <SelectTrigger className="w-[170px]"><SelectValue placeholder="All categories" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All categories</SelectItem>
-            {CATEGORY_OPTIONS.map((c) => (
-              <SelectItem key={c.value} value={c.value}>
-                {c.label}
-              </SelectItem>
-            ))}
+            {CATEGORY_OPTIONS.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
+          <SelectTrigger className="w-[140px]"><SelectValue placeholder="All statuses" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All statuses</SelectItem>
             <SelectItem value="open">Open</SelectItem>
@@ -194,61 +158,63 @@ export function TodoClient({ initialTodos }: Props) {
         </Select>
       </div>
 
-      {/* List */}
       {filtered.length === 0 ? (
-        <EmptyState />
+        <div className="px-1 py-16 text-center">
+          <p className="text-[17px] text-[var(--fg2)]">No tasks here yet.</p>
+          <p className="mt-2 text-[14px] text-[var(--fg3)]">Add your first one to get started.</p>
+        </div>
       ) : (
-        <ul className="list-none">
+        <ListGroup>
           {filtered.map((t) => (
-            <li
-              key={t.id}
-              className={`flex items-start gap-4 p-5 bg-paper border border-line rounded-[4px] mb-2.5 transition-shadow duration-200 hover:shadow-soft ${
-                t.done ? "opacity-55" : ""
-              }`}
-            >
-              <Checkbox
-                checked={t.done}
-                onCheckedChange={() => handleToggle(t)}
-                className="mt-0.5"
+            <ListRow key={t.id} className="group">
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={t.done}
                 aria-label={t.done ? "Mark as not done" : "Mark as done"}
-              />
-              <div className="flex-1 min-w-0">
-                <button
-                  type="button"
-                  onClick={() => handleEdit(t)}
-                  className={`text-[15px] text-ink font-medium mb-1 text-left hover:text-burgundy transition-colors ${
-                    t.done ? "line-through" : ""
-                  }`}
+                onClick={() => handleToggle(t)}
+                className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-full border-[1.5px] text-[12px] font-bold text-white"
+                style={{ borderColor: t.done ? "var(--accent)" : "var(--sep)", background: t.done ? "var(--accent)" : "transparent" }}
+              >
+                {t.done ? "✓" : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleEdit(t)}
+                className="min-w-0 flex-1 text-left"
+              >
+                <div
+                  className="text-[17px] tracking-[-0.014em]"
+                  style={t.done ? { color: "var(--fg3)", textDecoration: "line-through" } : undefined}
                 >
                   {t.text}
-                </button>
-                <div className="flex flex-wrap gap-3 text-xs text-ink-soft items-center">
-                  <span className={`tag tag-${t.category}`}>{t.category}</span>
-                  <span className={`priority-${t.priority}`}>
-                    {t.priority.toUpperCase()} priority
-                  </span>
-                  {t.due_date && <span>Due {formatDate(t.due_date)}</span>}
                 </div>
-              </div>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => handleDelete(t)}
-                className="self-center"
+                <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">
+                  {t.category} · {t.priority}{t.due_date ? ` · Due ${formatDate(t.due_date)}` : ""}
+                </div>
+              </button>
+              <span
+                className="text-[14px] whitespace-nowrap"
+                style={{ color: PRIORITY_COLOR[t.priority], opacity: t.done ? 0.4 : 1 }}
               >
-                Delete
-              </Button>
-            </li>
+                {t.priority === "high" ? "High" : t.priority === "medium" ? "Medium" : "Low"}
+              </span>
+              <button
+                type="button"
+                aria-label="Delete task"
+                onClick={() => handleDelete(t)}
+                className="text-[15px] leading-none text-[var(--fg3)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--accent)]"
+              >
+                ×
+              </button>
+            </ListRow>
           ))}
-        </ul>
+        </ListGroup>
       )}
 
       <TodoDialog
         open={dialogOpen}
-        onOpenChange={(o) => {
-          setDialogOpen(o);
-          if (!o) setEditing(null);
-        }}
+        onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditing(null); }}
         editing={editing}
       />
     </section>
@@ -256,35 +222,17 @@ export function TodoClient({ initialTodos }: Props) {
 }
 
 // ============================================================================
-// Empty state
-// ============================================================================
-
-function EmptyState() {
-  return (
-    <div className="text-center py-15 px-5 text-ink-soft">
-      <div className="empty-ornament mb-3">∅</div>
-      <p className="font-serif italic text-[22px]">No tasks here yet.</p>
-      <p className="text-[13px] mt-2">Add your first one to get started.</p>
-    </div>
-  );
-}
-
-// ============================================================================
-// Dialog (add/edit)
+// Dialog (add/edit) — restyled with the rest of the shared dialogs later
 // ============================================================================
 
 function TodoDialog({
-  open,
-  onOpenChange,
-  editing,
+  open, onOpenChange, editing,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   editing: TodoRow | null;
 }) {
-  const action = editing
-    ? updateTodo.bind(null, editing.id)
-    : createTodo;
+  const action = editing ? updateTodo.bind(null, editing.id) : createTodo;
   const isEdit = editing !== null;
 
   const [state, formAction, pending] = useActionState<
@@ -292,31 +240,16 @@ function TodoDialog({
     FormData
   >(action, null);
 
-  // Close dialog on success.
   useEffect(() => {
-    if (state?.ok) {
-      onOpenChange(false);
-    }
+    if (state?.ok) onOpenChange(false);
   }, [state, onOpenChange]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            {isEdit ? (
-              <>
-                Edit <em>task</em>
-              </>
-            ) : (
-              <>
-                New <em>task</em>
-              </>
-            )}
-          </DialogTitle>
-          <DialogDescription>
-            {isEdit ? "Update what needs doing." : "Add something to your list."}
-          </DialogDescription>
+          <DialogTitle>{isEdit ? <>Edit <em>task</em></> : <>New <em>task</em></>}</DialogTitle>
+          <DialogDescription>{isEdit ? "Update what needs doing." : "Add something to your list."}</DialogDescription>
         </DialogHeader>
 
         <form action={formAction} className="flex flex-col gap-4 mt-2">
@@ -335,49 +268,25 @@ function TodoDialog({
           <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
             <div className="flex flex-col gap-2">
               <Label htmlFor="category">Category</Label>
-              {/* Hidden input for the form payload — Radix Select doesn't write to FormData on its own */}
-              <SelectFormField
-                name="category"
-                defaultValue={editing?.category ?? "wedding"}
-                options={CATEGORY_OPTIONS}
-              />
+              <SelectFormField name="category" defaultValue={editing?.category ?? "wedding"} options={CATEGORY_OPTIONS} />
             </div>
 
             <div className="flex flex-col gap-2">
               <Label htmlFor="priority">Priority</Label>
-              <SelectFormField
-                name="priority"
-                defaultValue={editing?.priority ?? "medium"}
-                options={PRIORITY_OPTIONS}
-              />
+              <SelectFormField name="priority" defaultValue={editing?.priority ?? "medium"} options={PRIORITY_OPTIONS} />
             </div>
           </div>
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="due_date">Due date (optional)</Label>
-            <Input
-              id="due_date"
-              name="due_date"
-              type="date"
-              defaultValue={editing?.due_date ?? ""}
-            />
+            <Input id="due_date" name="due_date" type="date" defaultValue={editing?.due_date ?? ""} />
           </div>
 
-          {state?.error && (
-            <p className="text-sm text-burgundy">{state.error}</p>
-          )}
+          {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : "Save"}
-            </Button>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -385,15 +294,8 @@ function TodoDialog({
   );
 }
 
-// ============================================================================
-// Helper: Select that writes its value into a hidden <input name=...> so the
-// form action receives it via FormData.
-// ============================================================================
-
 function SelectFormField({
-  name,
-  defaultValue,
-  options,
+  name, defaultValue, options,
 }: {
   name: string;
   defaultValue: string;
@@ -414,15 +316,9 @@ function SelectFormField({
     <>
       <input type="hidden" name={name} value={value} />
       <Select value={value} onValueChange={setValue}>
-        <SelectTrigger>
-          <SelectValue />
-        </SelectTrigger>
+        <SelectTrigger><SelectValue /></SelectTrigger>
         <SelectContent>
-          {options.map((o) => (
-            <SelectItem key={o.value} value={o.value}>
-              {o.label}
-            </SelectItem>
-          ))}
+          {options.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
         </SelectContent>
       </Select>
     </>
