@@ -25,10 +25,12 @@
   --shadow-lg: 0 4px 12px rgba(43, 29, 26, 0.1), 0 24px 48px rgba(43, 29, 26, 0.12);
 
   /* shadcn-compatible aliases — kept dim so default shadcn primitives
-     don't fight the romantic palette. We override most surfaces explicitly. */
+     don't fight the romantic palette. We override most surfaces explicitly.
+     --card and --accent are redefined below by the Apple redesign tokens;
+     nothing in src/ reads the raw shadcn utilities (bg-card, text-accent, …)
+     so repurposing them is safe. */
   --background: var(--cream);
   --foreground: var(--ink);
-  --card: var(--paper);
   --card-foreground: var(--ink);
   --popover: var(--paper);
   --popover-foreground: var(--ink);
@@ -38,7 +40,6 @@
   --secondary-foreground: var(--ink);
   --muted: var(--cream-deep);
   --muted-foreground: var(--ink-soft);
-  --accent: var(--burgundy);
   --accent-foreground: var(--cream);
   --destructive: var(--burgundy);
   --destructive-foreground: var(--cream);
@@ -46,6 +47,45 @@
   --input: var(--line);
   --ring: var(--burgundy);
   --radius: 4px;
+}
+
+/* ==========================================================================
+   Apple redesign tokens — new design system, ported screen by screen
+   (see design_handoff_apple_redesign). Started with Guests; the rest of the
+   app still reads the cream/burgundy tokens above until it's ported too.
+   ========================================================================== */
+:root {
+  color-scheme: light;
+  --bg: #f2f2f7;
+  --card: #ffffff;
+  --fg: #000000;
+  --fg2: #6c6c70;
+  --fg3: #a1a1a6;
+  --sep: rgba(60, 60, 67, 0.17);
+  --fill: rgba(120, 120, 128, 0.14);
+  --accent: #c2415f;
+  --green: #2f9e4f;
+  --red: #c9332b;
+  --amber: #a67512;
+  --nav: rgba(246, 246, 248, 0.8);
+  --font-apple: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+    "Helvetica Neue", "Segoe UI", sans-serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --card: #1c1c1e;
+  --fg: #ffffff;
+  --fg2: #98989e;
+  --fg3: #6c6c70;
+  --sep: rgba(84, 84, 88, 0.6);
+  --fill: rgba(120, 120, 128, 0.24);
+  --accent: #ff6f8d;
+  --green: #30d158;
+  --red: #ff453a;
+  --amber: #ffd60a;
+  --nav: rgba(20, 20, 22, 0.8);
 }
 
 @theme inline {
@@ -258,6 +298,35 @@ body > :not([data-radix-portal]) {
   .rsvp-yes     { color: var(--sage); font-weight: 600; }
   .rsvp-no      { color: var(--burgundy); font-weight: 600; }
   .rsvp-pending { color: var(--ink-soft); }
+
+  /* ============ APPLE REDESIGN ============ */
+  .font-apple { font-family: var(--font-apple); }
+
+  /* Inset list row: the hairline sits on the inner element, stopping short
+     of the card's left edge, and is omitted on each group's first row. */
+  .list-row { padding-left: 18px; }
+  .list-row > .list-row-inner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding: 12px 18px 12px 0;
+    text-align: left;
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+  }
+  .list-row + .list-row > .list-row-inner {
+    border-top: 1px solid var(--sep);
+  }
+  .list-row.is-interactive > .list-row-inner {
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+  }
+  .list-row.is-interactive:hover > .list-row-inner {
+    opacity: 0.72;
+  }
 }
 
 /* Empty state ornament — large italic gold mark */

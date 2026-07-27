@@ -3,9 +3,11 @@
 import { useActionState, useEffect, useState, useTransition } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { GuestRow, GuestRsvp, GuestSide } from "@/types/db";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ListGroup, ListRow } from "@/components/ui/list-group";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -31,41 +33,31 @@ const RSVP_OPTIONS: { value: GuestRsvp; label: string }[] = [
   { value: "no", label: "No" },
 ];
 
+const SIDE_LABEL: Record<GuestSide, string> = {
+  bride: "Selver's side",
+  groom: "Celal's side",
+  both: "Both sides",
+};
+
+const RSVP_LABEL: Record<GuestRsvp, string> = {
+  yes: "Coming",
+  no: "Declined",
+  pending: "Pending",
+};
+
+const RSVP_DOT: Record<GuestRsvp, string> = {
+  yes: "var(--green)",
+  no: "var(--red)",
+  pending: "var(--amber)",
+};
+
 interface Props {
   initialGuests: GuestRow[];
 }
 
-type SortKey = "name" | "side" | "category" | "plus_one" | "rsvp" | "invited";
-type SortDir = "asc" | "desc";
-
-// Rank order for RSVP so sorting follows a meaningful progression.
-const RSVP_RANK: Record<GuestRsvp, number> = { yes: 0, pending: 1, no: 2 };
-
-function compareGuests(a: GuestRow, b: GuestRow, key: SortKey): number {
-  switch (key) {
-    case "name":
-      return a.name.localeCompare(b.name);
-    case "side":
-      return a.side.localeCompare(b.side);
-    case "category":
-      return (a.category ?? "").localeCompare(b.category ?? "");
-    case "plus_one":
-      // Guests with a plus one sort first (true before false).
-      return Number(b.plus_one) - Number(a.plus_one);
-    case "rsvp":
-      return RSVP_RANK[a.rsvp] - RSVP_RANK[b.rsvp];
-    case "invited":
-      return Number(b.invited) - Number(a.invited);
-    default:
-      return 0;
-  }
-}
-
 export function GuestsClient({ initialGuests }: Props) {
   const [guests, setGuests] = useState<GuestRow[]>(initialGuests);
-  const [categoryFilter, setCategoryFilter] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [filter, setFilter] = useState("Everyone");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<GuestRow | null>(null);
   const [, startTransition] = useTransition();
@@ -93,30 +85,15 @@ export function GuestsClient({ initialGuests }: Props) {
   const total = guests.length;
   const yesCount = guests.filter((g) => g.rsvp === "yes").length;
   const noCount = guests.filter((g) => g.rsvp === "no").length;
-  const pending = guests.filter((g) => g.rsvp === "pending").length;
+  const pendingCount = guests.filter((g) => g.rsvp === "pending").length;
   const plusOnes = guests.filter((g) => g.plus_one).length;
 
   const categories = [...new Set(guests.map((g) => g.category).filter(Boolean))] as string[];
+  const filters = ["Everyone", ...categories];
 
-  const filtered = categoryFilter
-    ? guests.filter((g) => g.category === categoryFilter)
-    : guests;
-
-  const sorted = [...filtered].sort((a, b) => {
-    const cmp = compareGuests(a, b, sortKey);
-    // Stable tie-break on name so equal keys keep a predictable order.
-    const resolved = cmp !== 0 ? cmp : a.name.localeCompare(b.name);
-    return sortDir === "asc" ? resolved : -resolved;
-  });
-
-  const handleSort = (key: SortKey) => {
-    if (key === sortKey) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
-  };
+  const visibleGuests = (filter === "Everyone" ? guests : guests.filter((g) => g.category === filter))
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const handleDelete = (g: GuestRow) => {
     if (!confirm(`Delete "${g.name}"?`)) return;
@@ -125,156 +102,88 @@ export function GuestsClient({ initialGuests }: Props) {
   };
 
   return (
-    <section className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div className="flex items-end justify-between mb-8 pb-5 border-b border-line max-md:flex-col max-md:items-start max-md:gap-4">
-        <div>
-          <h2 className="font-serif text-[42px] font-normal leading-none tracking-[-0.01em] mb-2">
-            The <em>guests</em>
-          </h2>
-          <p className="text-sm text-ink-soft">Who&rsquo;s celebrating with us.</p>
-        </div>
-        <Button onClick={() => { setEditing(null); setDialogOpen(true); }}>+ New guest</Button>
-      </div>
-
-      {/* Stats row */}
-      <div className="guest-stats mb-6">
-        <div className="guest-stat">
-          <div className="v">{total + plusOnes}</div>
-          <div className="l">Total invited</div>
-        </div>
-        <div className="guest-stat">
-          <div className="v" style={{ color: "var(--sage)" }}>{yesCount}</div>
-          <div className="l">Confirmed</div>
-        </div>
-        <div className="guest-stat">
-          <div className="v" style={{ color: "var(--burgundy)" }}>{noCount}</div>
-          <div className="l">Declined</div>
-        </div>
-        <div className="guest-stat">
-          <div className="v" style={{ color: "var(--gold)" }}>{pending}</div>
-          <div className="l">Pending</div>
-        </div>
-        <div className="guest-stat">
-          <div className="v">{plusOnes}</div>
-          <div className="l">Plus ones</div>
-        </div>
-      </div>
-
-      {/* Category filter chips */}
-      <div className="guest-filters mb-6">
+    <section className="font-apple flex flex-col gap-6 text-[var(--fg)]">
+      <div className="flex items-start justify-between gap-4 px-1">
+        <h1 className="text-[clamp(26px,3.4vw,34px)] font-bold leading-tight tracking-[-0.026em]">Guests</h1>
         <button
           type="button"
-          className={`filter-chip${categoryFilter === "" ? " active" : ""}`}
-          onClick={() => setCategoryFilter("")}
+          onClick={() => { setEditing(null); setDialogOpen(true); }}
+          className="whitespace-nowrap border-none bg-transparent p-0 text-[16px] text-[var(--accent)] transition-opacity hover:opacity-60"
         >
-          All
+          Add guest
         </button>
-        {categories.map((c) => (
-          <button
-            key={c}
-            type="button"
-            className={`filter-chip${categoryFilter === c ? " active" : ""}`}
-            onClick={() => setCategoryFilter(c)}
-          >
-            {c}
-          </button>
-        ))}
       </div>
 
-      {/* Table */}
-      <div className="bg-paper border border-line rounded-[4px] shadow-soft p-2">
-        {guests.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="guest-table w-full">
-              <thead>
-                <tr>
-                  <SortHeader label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="Side" sortKey="side" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="Category" sortKey="category" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="Plus 1" sortKey="plus_one" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="RSVP" sortKey="rsvp" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="Invite" sortKey="invited" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((g) => (
-                  <tr key={g.id}>
-                    <td>
-                      <button
-                        type="button"
-                        className="font-medium text-left hover:text-burgundy transition-colors"
-                        onClick={() => { setEditing(g); setDialogOpen(true); }}
-                      >
-                        {g.name}
-                      </button>
-                    </td>
-                    <td>{g.side}</td>
-                    <td>{g.category ?? "—"}</td>
-                    <td>
-                      {g.plus_one
-                        ? `✓ ${g.plus_one_name ?? "Yes"}`
-                        : "—"}
-                    </td>
-                    <td>
-                      <span className={`rsvp-${g.rsvp}`}>{g.rsvp.toUpperCase()}</span>
-                    </td>
-                    <td>{g.invited ? "✓ Sent" : "—"}</td>
-                    <td>
-                      <Button variant="danger" size="sm" onClick={() => handleDelete(g)}>×</Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div className="px-1 py-0.5">
+        <div className="text-[clamp(38px,6vw,54px)] font-bold leading-none tracking-[-0.04em] tabular-nums">
+          {yesCount} of {total + plusOnes} coming
+        </div>
+        <div className="mt-3 text-[16px] tracking-[-0.012em] text-[var(--fg2)]">
+          {pendingCount} still to reply · {noCount} declined · {plusOnes} plus one{plusOnes === 1 ? "" : "s"}
+        </div>
+        {total > 0 && (
+          <div className="mt-[18px] flex h-[6px] max-w-[520px] overflow-hidden rounded-[3px] bg-[var(--fill)]">
+            <div title={`${yesCount} coming`} style={{ width: `${(yesCount / total) * 100}%`, background: "var(--green)" }} />
+            <div title={`${pendingCount} pending`} style={{ width: `${(pendingCount / total) * 100}%`, background: "var(--amber)" }} />
+            <div title={`${noCount} declined`} style={{ width: `${(noCount / total) * 100}%`, background: "var(--red)" }} />
           </div>
         )}
       </div>
+
+      <div className="flex flex-wrap gap-2">
+        {filters.map((f) => {
+          const active = filter === f;
+          return (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFilter(f)}
+              className={cn(
+                "h-[30px] whitespace-nowrap rounded-full px-[13px] text-[14px] tracking-[-0.01em] transition-colors",
+                active ? "bg-[var(--fg)] font-[560] text-[var(--bg)]" : "bg-[var(--fill)] font-[440] text-[var(--fg)]"
+              )}
+            >
+              {f}
+            </button>
+          );
+        })}
+      </div>
+
+      <ListGroup>
+        {visibleGuests.length === 0 ? (
+          <ListRow>
+            <span className="text-[15px] text-[var(--fg2)]">No guests match this filter.</span>
+          </ListRow>
+        ) : (
+          visibleGuests.map((g) => (
+            <ListRow
+              key={g.id}
+              as="button"
+              interactive
+              onClick={() => { setEditing(g); setDialogOpen(true); }}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-[17px] tracking-[-0.014em]">{g.name}</div>
+                <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">
+                  {SIDE_LABEL[g.side]}{g.plus_one ? ` · plus ${g.plus_one_name || "one"}` : ""}
+                </div>
+              </div>
+              <div className="ml-auto flex items-center gap-2 whitespace-nowrap">
+                <span className="h-[7px] w-[7px] rounded-full" style={{ background: RSVP_DOT[g.rsvp] }} />
+                <span className="text-[15px] tracking-[-0.01em] text-[var(--fg2)]">{RSVP_LABEL[g.rsvp]}</span>
+              </div>
+            </ListRow>
+          ))
+        )}
+      </ListGroup>
 
       <GuestDialog
         open={dialogOpen}
         onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditing(null); }}
         editing={editing}
+        onDelete={handleDelete}
       />
     </section>
-  );
-}
-
-function SortHeader({
-  label, sortKey, activeKey, dir, onSort,
-}: {
-  label: string;
-  sortKey: SortKey;
-  activeKey: SortKey;
-  dir: SortDir;
-  onSort: (key: SortKey) => void;
-}) {
-  const active = activeKey === sortKey;
-  return (
-    <th aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}>
-      <button
-        type="button"
-        onClick={() => onSort(sortKey)}
-        className="inline-flex items-center gap-1 uppercase tracking-[0.15em] font-semibold text-[11px] hover:text-burgundy transition-colors"
-      >
-        {label}
-        <span className={`text-[9px] leading-none ${active ? "opacity-100" : "opacity-30"}`}>
-          {active ? (dir === "asc" ? "▲" : "▼") : "▲"}
-        </span>
-      </button>
-    </th>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="text-center py-15 px-5 text-ink-soft">
-      <div className="empty-ornament mb-3">♥</div>
-      <p className="font-serif italic text-[22px]">No guests yet.</p>
-      <p className="text-[13px] mt-2">Start with the closest family.</p>
-    </div>
   );
 }
 
@@ -303,18 +212,17 @@ function SelectField({
 }
 
 function GuestDialog({
-  open, onOpenChange, editing,
+  open, onOpenChange, editing, onDelete,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   editing: GuestRow | null;
+  onDelete: (g: GuestRow) => void;
 }) {
   const action = editing ? updateGuest.bind(null, editing.id) : createGuest;
   const [state, formAction, pending] = useActionState<{ error?: string; ok?: true } | null, FormData>(action, null);
-  const [plusOne, setPlusOne] = useState(editing?.plus_one ?? false);
 
   useEffect(() => { if (state?.ok) onOpenChange(false); }, [state, onOpenChange]);
-  useEffect(() => { setPlusOne(editing?.plus_one ?? false); }, [editing]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -396,6 +304,16 @@ function GuestDialog({
           {state?.error && <p className="text-sm text-burgundy">{state.error}</p>}
 
           <DialogFooter>
+            {editing && (
+              <Button
+                type="button"
+                variant="danger"
+                className="mr-auto"
+                onClick={() => { onDelete(editing); onOpenChange(false); }}
+              >
+                Delete
+              </Button>
+            )}
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
           </DialogFooter>
