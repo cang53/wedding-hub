@@ -44,7 +44,9 @@ export default async function DashboardPage() {
 
   const guestsYes = guests.filter((g) => g.rsvp === "yes").length;
   const guestsReplied = guests.filter((g) => g.rsvp === "yes" || g.rsvp === "no").length;
-  const plusOnes = guests.filter((g) => g.plus_one).length;
+  // Count the plus ones of guests who actually said yes — a declined guest
+  // isn't bringing anyone, so folding all plus ones in here would overstate it.
+  const comingPlusOnes = guests.filter((g) => g.rsvp === "yes" && g.plus_one).length;
 
   const tasksDone = todos.filter((t) => t.done).length;
   const openTasks = todos.filter((t) => !t.done);
@@ -68,7 +70,10 @@ export default async function DashboardPage() {
         },
       }}
       facts={[
-        { label: "Coming so far", value: `${guestsYes}${plusOnes > 0 ? ` · ${plusOnes} plus one${plusOnes === 1 ? "" : "s"}` : ""}` },
+        {
+          label: "Coming so far",
+          value: `${guestsYes + comingPlusOnes}${comingPlusOnes > 0 ? ` · incl. ${comingPlusOnes} plus one${comingPlusOnes === 1 ? "" : "s"}` : ""}`,
+        },
         { label: "Still to pay", value: formatMoney(Math.max(0, totalEstimated - totalPaid)) },
         {
           label: "Honeymoon",

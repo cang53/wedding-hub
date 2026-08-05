@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useCallback, useEffect, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { GuestRow, GuestRsvp, GuestSide } from "@/types/db";
 import { cn } from "@/lib/utils";
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { createGuest, deleteGuest, updateGuest } from "./actions";
 import { collectGroups, groupColor, normalizeGroup, UNGROUPED_LABEL } from "./group-colors";
+import { tally } from "./headcount";
 
 const SIDE_OPTIONS: { value: GuestSide; label: string }[] = [
   { value: "bride", label: "Bride's side" },
@@ -100,11 +102,12 @@ export function GuestsClient({ initialGuests }: Props) {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  const total = guests.length;
-  const yesCount = guests.filter((g) => g.rsvp === "yes").length;
-  const noCount = guests.filter((g) => g.rsvp === "no").length;
-  const pendingCount = guests.filter((g) => g.rsvp === "pending").length;
-  const plusOnes = guests.filter((g) => g.plus_one).length;
+  // Headline and bar are counted in *heads* (a guest plus their plus one), so
+  // the two halves of "x of y coming" are the same kind of number. The bar
+  // segments therefore add up to the total rather than to the row count.
+  const counts = tally(guests);
+  const total = counts.invitations;
+  const plusOnes = counts.plusOnes;
 
   const categories = [...new Set(guests.map((g) => g.category).filter(Boolean))] as string[];
   const filters = ["Everyone", ...categories];
@@ -158,18 +161,26 @@ export function GuestsClient({ initialGuests }: Props) {
     <section className="font-apple flex flex-col gap-6 text-[var(--fg)]">
       <div className="px-1 py-0.5">
         <div className="text-[clamp(38px,6vw,54px)] font-bold leading-none tracking-[-0.04em] tabular-nums">
-          {yesCount} of {total + plusOnes} coming
+          {counts.coming} of {counts.heads} coming
         </div>
         <div className="mt-3 text-[16px] tracking-[-0.012em] text-[var(--fg2)]">
-          {pendingCount} still to reply · {noCount} declined · {plusOnes} plus one{plusOnes === 1 ? "" : "s"}
+          {counts.pending} still to reply · {counts.declined} declined ·{" "}
+          {plusOnes} plus one{plusOnes === 1 ? "" : "s"} included
         </div>
-        {total > 0 && (
+        {counts.heads > 0 && (
           <div className="mt-[18px] flex h-[6px] max-w-[520px] overflow-hidden rounded-[3px] bg-[var(--fill)]">
-            <div title={`${yesCount} coming`} style={{ width: `${(yesCount / total) * 100}%`, background: "var(--green)" }} />
-            <div title={`${pendingCount} pending`} style={{ width: `${(pendingCount / total) * 100}%`, background: "var(--amber)" }} />
-            <div title={`${noCount} declined`} style={{ width: `${(noCount / total) * 100}%`, background: "var(--red)" }} />
+            <div title={`${counts.coming} coming`} style={{ width: `${(counts.coming / counts.heads) * 100}%`, background: "var(--green)" }} />
+            <div title={`${counts.pending} pending`} style={{ width: `${(counts.pending / counts.heads) * 100}%`, background: "var(--amber)" }} />
+            <div title={`${counts.declined} declined`} style={{ width: `${(counts.declined / counts.heads) * 100}%`, background: "var(--red)" }} />
           </div>
         )}
+        <Link
+          href="/guests/stats"
+          className="mt-4 inline-flex items-center gap-1 text-[15px] text-[var(--accent)] transition-opacity hover:opacity-60"
+        >
+          See the full breakdown
+          <span aria-hidden>›</span>
+        </Link>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
