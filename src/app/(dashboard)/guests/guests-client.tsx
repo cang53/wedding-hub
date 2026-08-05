@@ -73,6 +73,8 @@ interface Props {
 type GuestView = "party" | "list" | "groups";
 /** Ordering *within* each side's column — the split by side is the layout itself. */
 type GroupBy = "none" | "rsvp" | "group";
+/** Groups view only: which side's guests the group cards should count. */
+type SideFilter = GuestSide | "all";
 
 export function GuestsClient({ initialGuests }: Props) {
   const [guests, setGuests] = useState<GuestRow[]>(initialGuests);
@@ -80,6 +82,7 @@ export function GuestsClient({ initialGuests }: Props) {
   const [search, setSearch] = useState("");
   const [view, setView] = useState<GuestView>("list");
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
+  const [sideFilter, setSideFilter] = useState<SideFilter>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<GuestRow | null>(null);
   const [, startTransition] = useTransition();
@@ -234,6 +237,20 @@ export function GuestsClient({ initialGuests }: Props) {
             onChange={setGroupBy}
           />
         )}
+        {/* The Groups view already ignores the bride/groom split, so it's the
+            one place where narrowing to a single side has to be explicit. */}
+        {view === "groups" && (
+          <Segmented
+            options={[
+              { value: "all", label: "Everyone" },
+              { value: "groom", label: "Celal" },
+              { value: "bride", label: "Selver" },
+              { value: "both", label: "Both" },
+            ]}
+            value={sideFilter}
+            onChange={setSideFilter}
+          />
+        )}
       </div>
 
       {(searchLower || filter !== "Everyone") && (
@@ -255,7 +272,8 @@ export function GuestsClient({ initialGuests }: Props) {
         <GuestParty guests={visibleGuests} onEdit={(g) => { setEditing(g); setDialogOpen(true); }} />
       ) : view === "groups" ? (
         <GuestGroups
-          guests={visibleGuests}
+          guests={sideFilter === "all" ? visibleGuests : visibleGuests.filter((g) => g.side === sideFilter)}
+          sideNote={sideFilter === "all" ? undefined : SIDE_LABEL[sideFilter]}
           onEdit={(g) => { setEditing(g); setDialogOpen(true); }}
           onCycleRsvp={(g) => patchGuest(g, { rsvp: NEXT_RSVP[g.rsvp] })}
           onToggleInvited={(g) => patchGuest(g, { invited: !g.invited })}
@@ -581,15 +599,21 @@ function GuestColumn({
 // ============================================================================
 
 function GuestGroups({
-  guests, ...handlers
-}: { guests: GuestRow[] } & ColumnHandlers) {
+  guests, sideNote, ...handlers
+}: {
+  guests: GuestRow[];
+  /** Set when a single side is being shown, so the cards say whose guests these are. */
+  sideNote?: string;
+} & ColumnHandlers) {
   const names = collectGroups(guests);
   const ungrouped = guests.filter((g) => !normalizeGroup(g.guest_group));
 
   if (guests.length === 0) {
     return (
       <div className="rounded-[16px] bg-[var(--card)] px-1 py-16 text-center">
-        <p className="text-[15px] text-[var(--fg2)]">No guests match this filter.</p>
+        <p className="text-[15px] text-[var(--fg2)]">
+          {sideNote ? `Nobody from ${sideNote} matches this filter.` : "No guests match this filter."}
+        </p>
       </div>
     );
   }
@@ -607,18 +631,26 @@ function GuestGroups({
   }
 
   return (
-    <div className="grid gap-5 lg:grid-cols-2">
-      {names.map((name) => (
-        <GuestGroupCard
-          key={name}
-          name={name}
-          guests={guestsInGroup(guests, name)}
-          {...handlers}
-        />
-      ))}
-      {ungrouped.length > 0 && (
-        <GuestGroupCard name={null} guests={ungrouped} {...handlers} />
+    <div className="flex flex-col gap-3">
+      {sideNote && (
+        <div className="px-[18px] text-[13px] tracking-[-0.004em] text-[var(--fg2)]">
+          {sideNote} only · {guests.length} guest{guests.length === 1 ? "" : "s"} across{" "}
+          {names.length} group{names.length === 1 ? "" : "s"}
+        </div>
       )}
+      <div className="grid gap-5 lg:grid-cols-2">
+        {names.map((name) => (
+          <GuestGroupCard
+            key={name}
+            name={name}
+            guests={guestsInGroup(guests, name)}
+            {...handlers}
+          />
+        ))}
+        {ungrouped.length > 0 && (
+          <GuestGroupCard name={null} guests={ungrouped} {...handlers} />
+        )}
+      </div>
     </div>
   );
 }
