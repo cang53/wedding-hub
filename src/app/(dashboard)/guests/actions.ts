@@ -1,7 +1,7 @@
 "use server";
 
 import { createSupabaseServiceClient as createSupabaseServerClient } from "@/lib/supabase/service";
-import type { GuestRsvp, GuestSide } from "@/types/db";
+import type { GuestRow, GuestRsvp, GuestSide } from "@/types/db";
 
 const VALID_SIDES: GuestSide[] = ["bride", "groom", "both"];
 const VALID_RSVP: GuestRsvp[] = ["pending", "yes", "no"];
@@ -30,9 +30,15 @@ export async function createGuest(_prev: unknown, form: FormData) {
   if ("error" in parsed) return { error: parsed.error };
 
   const supabase = createSupabaseServerClient();
-  const { error } = await supabase.from("guests").insert(parsed as never);
+  // Return the saved row so the client can merge it straight into its list —
+  // the realtime channel is a nice-to-have, not something the UI waits on.
+  const { data, error } = await supabase
+    .from("guests")
+    .insert(parsed as never)
+    .select()
+    .single();
   if (error) return { error: error.message };
-  return { ok: true as const };
+  return { ok: true as const, guest: data as GuestRow };
 }
 
 export async function updateGuest(id: string, _prev: unknown, form: FormData) {
@@ -40,9 +46,14 @@ export async function updateGuest(id: string, _prev: unknown, form: FormData) {
   if ("error" in parsed) return { error: parsed.error };
 
   const supabase = createSupabaseServerClient();
-  const { error } = await supabase.from("guests").update(parsed as never).eq("id", id);
+  const { data, error } = await supabase
+    .from("guests")
+    .update(parsed as never)
+    .eq("id", id)
+    .select()
+    .single();
   if (error) return { error: error.message };
-  return { ok: true as const };
+  return { ok: true as const, guest: data as GuestRow };
 }
 
 export async function deleteGuest(id: string) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState, useTransition } from "react";
+import { useActionState, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { GuestRow, GuestRsvp, GuestSide } from "@/types/db";
 import { cn } from "@/lib/utils";
@@ -116,6 +116,16 @@ export function GuestsClient({ initialGuests }: Props) {
     .filter((g) => !searchLower || g.name.toLowerCase().includes(searchLower))
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name));
+
+  /** Merge a row the server just saved into the list, without waiting for the
+   *  realtime channel to echo it back. */
+  const upsertGuest = useCallback((row: GuestRow) => {
+    setGuests((prev) =>
+      prev.some((g) => g.id === row.id)
+        ? prev.map((g) => (g.id === row.id ? row : g))
+        : [row, ...prev]
+    );
+  }, []);
 
   const handleDelete = (g: GuestRow) => {
     if (!confirm(`Delete "${g.name}"?`)) return;
@@ -265,6 +275,7 @@ export function GuestsClient({ initialGuests }: Props) {
         onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditing(null); }}
         editing={editing}
         knownGroups={knownGroups}
+        onSaved={upsertGuest}
         onDelete={handleDelete}
       />
     </section>
@@ -856,18 +867,31 @@ function GroupField({
 }
 
 function GuestDialog({
-  open, onOpenChange, editing, knownGroups, onDelete,
+  open, onOpenChange, editing, knownGroups, onSaved, onDelete,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   editing: GuestRow | null;
   knownGroups: string[];
+  onSaved: (guest: GuestRow) => void;
   onDelete: (g: GuestRow) => void;
 }) {
   const action = editing ? updateGuest.bind(null, editing.id) : createGuest;
-  const [state, formAction, pending] = useActionState<{ error?: string; ok?: true } | null, FormData>(action, null);
+  const [state, formAction, pending] = useActionState<
+    { error?: string; ok?: true; guest?: GuestRow } | null, FormData
+  >(action, null);
 
-  useEffect(() => { if (state?.ok) onOpenChange(false); }, [state, onOpenChange]);
+  // The list is updated from the row the action returns rather than from the
+  // realtime echo, so the change is on screen the moment the card closes.
+  // The ref makes sure each result is applied once: `state` outlives the
+  // submit, and re-running would slam the card shut the next time it opens.
+  const applied = useRef<unknown>(null);
+  useEffect(() => {
+    if (!state?.ok || applied.current === state) return;
+    applied.current = state;
+    if (state.guest) onSaved(state.guest);
+    onOpenChange(false);
+  }, [state, onSaved, onOpenChange]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
