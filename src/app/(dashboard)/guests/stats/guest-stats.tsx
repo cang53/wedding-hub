@@ -2,7 +2,9 @@ import Link from "next/link";
 import type { GuestRow, GuestSide } from "@/types/db";
 import { ListGroup, ListRow } from "@/components/ui/list-group";
 import { ProgressRing } from "@/components/ui/progress-ring";
-import { collectGroups, groupColor, normalizeGroup, UNGROUPED_LABEL } from "../group-colors";
+import {
+  collectGroups, groupColor, normalizeGroup, sameGroup, UNGROUPED_LABEL,
+} from "../group-colors";
 import { pct, tally, type Tally } from "../headcount";
 
 const SIDE_LABEL: Record<GuestSide, string> = {
@@ -38,7 +40,7 @@ export function GuestStats({ guests }: { guests: GuestRow[] }) {
       key: name,
       label: name,
       color: groupColor(name).solid,
-      match: (g: GuestRow) => normalizeGroup(g.guest_group) === name,
+      match: (g: GuestRow) => sameGroup(g.guest_group, name),
     })),
     {
       key: "__ungrouped",

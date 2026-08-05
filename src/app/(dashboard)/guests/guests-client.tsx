@@ -18,7 +18,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { createGuest, deleteGuest, updateGuest } from "./actions";
-import { collectGroups, groupColor, normalizeGroup, UNGROUPED_LABEL } from "./group-colors";
+import {
+  collectGroups, groupColor, guestsInGroup, normalizeGroup, UNGROUPED_LABEL,
+} from "./group-colors";
 import { tally } from "./headcount";
 
 const SIDE_OPTIONS: { value: GuestSide; label: string }[] = [
@@ -460,7 +462,7 @@ function groupGuests(guests: GuestRow[], groupBy: GroupBy): GuestSection[] {
   if (groupBy === "group") {
     const names = collectGroups(guests);
     const sections: GuestSection[] = names.map((name) => {
-      const members = guests.filter((g) => normalizeGroup(g.guest_group) === name);
+      const members = guestsInGroup(guests, name);
       return {
         key: name,
         isGroup: true,
@@ -610,7 +612,7 @@ function GuestGroups({
         <GuestGroupCard
           key={name}
           name={name}
-          guests={guests.filter((g) => normalizeGroup(g.guest_group) === name)}
+          guests={guestsInGroup(guests, name)}
           {...handlers}
         />
       ))}
@@ -816,13 +818,16 @@ function GroupField({
 
   const current = normalizeGroup(value);
   const color = groupColor(current);
-  const options = current && !knownGroups.some((g) => g.toLowerCase() === current.toLowerCase())
-    ? [...knownGroups, current]
-    : knownGroups;
+  const existing = knownGroups.find((g) => g.toLowerCase() === current?.toLowerCase());
+  // Typing "uni friends" when "Uni friends" already exists joins that group
+  // rather than starting a second spelling of it.
+  const saved = existing ?? current ?? "";
+  const options = current && !existing ? [...knownGroups, current] : knownGroups;
 
   return (
     <div className="flex flex-col gap-2">
       <Label htmlFor="guest_group">Group</Label>
+      <input type="hidden" name="guest_group" value={saved} />
       <div className="relative">
         <span
           className="pointer-events-none absolute top-1/2 left-3 h-[10px] w-[10px] -translate-y-1/2 rounded-full transition-colors"
@@ -830,7 +835,6 @@ function GroupField({
         />
         <Input
           id="guest_group"
-          name="guest_group"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder="Uni friends, Work, Cousins…"

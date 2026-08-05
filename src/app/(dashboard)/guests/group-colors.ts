@@ -46,6 +46,28 @@ export function normalizeGroup(group: string | null | undefined): string | null 
   return trimmed || null;
 }
 
+/**
+ * The identity of a group. "Uni friends" and "uni friends" are one group that
+ * happens to have been typed two ways, so membership is always tested on this
+ * key — never on the display string, which is only ever one of the spellings.
+ */
+export function groupKey(group: string | null | undefined): string | null {
+  return normalizeGroup(group)?.toLowerCase() ?? null;
+}
+
+/** True when two group strings name the same group (including both empty). */
+export function sameGroup(a: string | null | undefined, b: string | null | undefined): boolean {
+  return groupKey(a) === groupKey(b);
+}
+
+/** Everyone in one group, whichever way their group name is spelled. */
+export function guestsInGroup<T extends { guest_group: string | null }>(
+  guests: T[],
+  group: string | null,
+): T[] {
+  return guests.filter((g) => sameGroup(g.guest_group, group));
+}
+
 /** Stable, case-insensitive hash so "Uni" and "uni" land on the same colour. */
 function hashGroup(group: string): number {
   const key = group.toLowerCase();
@@ -69,12 +91,29 @@ export function groupColor(group: string | null | undefined): GroupColor {
   };
 }
 
-/** All group names present in a set of guests, alphabetical. */
+/**
+ * All group names present in a set of guests, alphabetical.
+ *
+ * Where a group has been typed with different capitalisation, the spelling
+ * used by the most guests wins (ties broken alphabetically) — picking the
+ * *first* one seen would make the label depend on the order of the list, so
+ * adding a guest could silently re-spell a group and drop everyone whose
+ * spelling no longer matched.
+ */
 export function collectGroups(guests: { guest_group: string | null }[]): string[] {
-  const seen = new Map<string, string>();
+  const spellings = new Map<string, Map<string, number>>();
   for (const g of guests) {
     const name = normalizeGroup(g.guest_group);
-    if (name && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
+    if (!name) continue;
+    const key = name.toLowerCase();
+    const counts = spellings.get(key) ?? new Map<string, number>();
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+    spellings.set(key, counts);
   }
-  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+
+  return [...spellings.values()]
+    .map((counts) =>
+      [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0]
+    )
+    .sort((a, b) => a.localeCompare(b));
 }
