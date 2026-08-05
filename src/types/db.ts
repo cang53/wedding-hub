@@ -106,6 +106,8 @@ export interface GuestRow {
   name: string;
   side: GuestSide;
   category: string | null;
+  /** Free-form group the guest belongs to ("Uni friends", "Work", …). */
+  guest_group: string | null;
   plus_one: boolean;
   plus_one_name: string | null;
   rsvp: GuestRsvp;
@@ -425,6 +427,7 @@ export type Database = {
           name: string;
           side?: GuestSide;
           category?: string | null;
+          guest_group?: string | null;
           plus_one?: boolean;
           plus_one_name?: string | null;
           rsvp?: GuestRsvp;
@@ -439,6 +442,7 @@ export type Database = {
           name?: string;
           side?: GuestSide;
           category?: string | null;
+          guest_group?: string | null;
           plus_one?: boolean;
           plus_one_name?: string | null;
           rsvp?: GuestRsvp;

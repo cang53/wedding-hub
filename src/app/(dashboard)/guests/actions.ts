@@ -10,6 +10,7 @@ function parseInput(form: FormData) {
   const name = String(form.get("name") ?? "").trim();
   const side = String(form.get("side") ?? "both") as GuestSide;
   const category = String(form.get("category") ?? "").trim() || null;
+  const guest_group = String(form.get("guest_group") ?? "").trim() || null;
   const plus_one = form.get("plus_one") === "true";
   const plus_one_name = String(form.get("plus_one_name") ?? "").trim() || null;
   const rsvp = String(form.get("rsvp") ?? "pending") as GuestRsvp;
@@ -21,7 +22,7 @@ function parseInput(form: FormData) {
   if (!VALID_SIDES.includes(side)) return { error: "Invalid side." };
   if (!VALID_RSVP.includes(rsvp)) return { error: "Invalid RSVP status." };
 
-  return { name, side, category, plus_one, plus_one_name, rsvp, invited, email, phone };
+  return { name, side, category, guest_group, plus_one, plus_one_name, rsvp, invited, email, phone };
 }
 
 export async function createGuest(_prev: unknown, form: FormData) {

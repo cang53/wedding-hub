@@ -17,6 +17,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { createGuest, deleteGuest, updateGuest } from "./actions";
+import { collectGroups, groupColor, normalizeGroup, UNGROUPED_LABEL } from "./group-colors";
 
 const SIDE_OPTIONS: { value: GuestSide; label: string }[] = [
   { value: "bride", label: "Bride's side" },
@@ -65,9 +66,9 @@ interface Props {
   initialGuests: GuestRow[];
 }
 
-type GuestView = "party" | "list";
+type GuestView = "party" | "list" | "groups";
 /** Ordering *within* each side's column — the split by side is the layout itself. */
-type GroupBy = "none" | "rsvp";
+type GroupBy = "none" | "rsvp" | "group";
 
 export function GuestsClient({ initialGuests }: Props) {
   const [guests, setGuests] = useState<GuestRow[]>(initialGuests);
@@ -107,6 +108,8 @@ export function GuestsClient({ initialGuests }: Props) {
 
   const categories = [...new Set(guests.map((g) => g.category).filter(Boolean))] as string[];
   const filters = ["Everyone", ...categories];
+  /** Every group name in use, offered as suggestions in the edit card. */
+  const knownGroups = collectGroups(guests);
 
   const searchLower = search.trim().toLowerCase();
   const visibleGuests = (filter === "Everyone" ? guests : guests.filter((g) => g.category === filter))
@@ -129,6 +132,7 @@ export function GuestsClient({ initialGuests }: Props) {
     fd.set("name", next.name);
     fd.set("side", next.side);
     fd.set("category", next.category ?? "");
+    fd.set("guest_group", next.guest_group ?? "");
     fd.set("plus_one", String(next.plus_one));
     fd.set("plus_one_name", next.plus_one_name ?? "");
     fd.set("rsvp", next.rsvp);
@@ -167,7 +171,11 @@ export function GuestsClient({ initialGuests }: Props) {
           className="min-w-[200px] flex-1"
         />
         <Segmented
-          options={[{ value: "list", label: "List" }, { value: "party", label: "Party" }]}
+          options={[
+            { value: "list", label: "List" },
+            { value: "groups", label: "Groups" },
+            { value: "party", label: "Party" },
+          ]}
           value={view}
           onChange={setView}
         />
@@ -194,7 +202,11 @@ export function GuestsClient({ initialGuests }: Props) {
         </div>
         {view === "list" && (
           <Segmented
-            options={[{ value: "none", label: "A–Z" }, { value: "rsvp", label: "RSVP" }]}
+            options={[
+              { value: "none", label: "A–Z" },
+              { value: "rsvp", label: "RSVP" },
+              { value: "group", label: "Group" },
+            ]}
             value={groupBy}
             onChange={setGroupBy}
           />
@@ -218,6 +230,13 @@ export function GuestsClient({ initialGuests }: Props) {
 
       {view === "party" ? (
         <GuestParty guests={visibleGuests} onEdit={(g) => { setEditing(g); setDialogOpen(true); }} />
+      ) : view === "groups" ? (
+        <GuestGroups
+          guests={visibleGuests}
+          onEdit={(g) => { setEditing(g); setDialogOpen(true); }}
+          onCycleRsvp={(g) => patchGuest(g, { rsvp: NEXT_RSVP[g.rsvp] })}
+          onToggleInvited={(g) => patchGuest(g, { invited: !g.invited })}
+        />
       ) : visibleGuests.length === 0 ? (
         <div className="rounded-[12px] bg-[var(--card)] px-1 py-14 text-center">
           <p className="text-[17px] text-[var(--fg2)]">
@@ -245,6 +264,7 @@ export function GuestsClient({ initialGuests }: Props) {
         open={dialogOpen}
         onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditing(null); }}
         editing={editing}
+        knownGroups={knownGroups}
         onDelete={handleDelete}
       />
     </section>
@@ -261,6 +281,30 @@ function getInitials(name: string): string {
   return name.split(/\s+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join("").toUpperCase() || "?";
 }
 
+/**
+ * A group's name in its own colour. The colour is derived from the name (see
+ * `group-colors.ts`), so it needs nothing but the string to stay consistent
+ * everywhere the group appears.
+ */
+function GroupChip({ name, size = "sm" }: { name: string; size?: "sm" | "md" }) {
+  const color = groupColor(name);
+  return (
+    <span
+      className={cn(
+        "inline-flex flex-none items-center gap-1.5 rounded-full whitespace-nowrap",
+        size === "sm" ? "px-2 py-[1px] text-[12px]" : "px-2.5 py-[3px] text-[13px]"
+      )}
+      style={{ background: color.tint, color: "var(--fg)" }}
+    >
+      <span
+        className="rounded-full"
+        style={{ width: 6, height: 6, background: color.solid }}
+      />
+      <span className="max-w-[140px] truncate tracking-[-0.006em]">{name}</span>
+    </span>
+  );
+}
+
 /** Small static initials badge with an RSVP-colored ring, used in list rows. */
 function GuestInitials({ guest, size = 32 }: { guest: GuestRow; size?: number }) {
   return (
@@ -270,7 +314,9 @@ function GuestInitials({ guest, size = 32 }: { guest: GuestRow; size?: number })
         width: size,
         height: size,
         fontSize: size * 0.36,
-        background: "var(--fill)",
+        // The badge is washed in the guest's group colour and ringed in their
+        // RSVP colour, so a row carries both at a glance.
+        background: groupColor(guest.guest_group).tint,
         color: "var(--fg)",
         boxShadow: `inset 0 0 0 1.5px ${RSVP_DOT[guest.rsvp]}`,
       }}
@@ -288,7 +334,7 @@ function GuestInitials({ guest, size = 32 }: { guest: GuestRow; size?: number })
 // ============================================================================
 
 function GuestListRow({
-  guest, onEdit, onCycleRsvp, onToggleInvited, compact = false,
+  guest, onEdit, onCycleRsvp, onToggleInvited, compact = false, hideGroup = false,
 }: {
   guest: GuestRow;
   onEdit: () => void;
@@ -297,7 +343,10 @@ function GuestListRow({
   /** Side-by-side columns are too narrow for the contact links; the edit
    *  dialog still shows them. */
   compact?: boolean;
+  /** Inside a group's own card or section the chip would just repeat the header. */
+  hideGroup?: boolean;
 }) {
+  const group = normalizeGroup(guest.guest_group);
   // In split-column mode the column header already states the side, so the
   // row spends that space on category instead.
   const secondary = [
@@ -316,7 +365,10 @@ function GuestListRow({
         <GuestInitials guest={guest} />
         <div className="min-w-0">
           <div className="truncate text-[17px] tracking-[-0.014em]">{guest.name}</div>
-          <div className="mt-0.5 truncate text-[14px] tracking-[-0.008em] text-[var(--fg2)]">{secondary}</div>
+          <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">
+            {group && !hideGroup && <GroupChip name={group} />}
+            {secondary && <span className="truncate">{secondary}</span>}
+          </div>
         </div>
       </button>
 
@@ -372,12 +424,49 @@ function GuestListRow({
 // sectioned ListGroups instead of one flat alphabetical run.
 // ============================================================================
 
-function groupGuests(guests: GuestRow[], groupBy: GroupBy): { label?: string; guests: GuestRow[] }[] {
-  if (groupBy === "none") return [{ guests }];
+interface GuestSection {
+  key: string;
+  label?: React.ReactNode;
+  guests: GuestRow[];
+  /** True for group sections, where the row chips would repeat the header. */
+  isGroup?: boolean;
+}
+
+function groupGuests(guests: GuestRow[], groupBy: GroupBy): GuestSection[] {
+  if (groupBy === "none") return [{ key: "all", guests }];
+
+  if (groupBy === "group") {
+    const names = collectGroups(guests);
+    const sections: GuestSection[] = names.map((name) => {
+      const members = guests.filter((g) => normalizeGroup(g.guest_group) === name);
+      return {
+        key: name,
+        isGroup: true,
+        label: (
+          <span className="flex items-center gap-2">
+            <GroupChip name={name} />
+            <span className="tabular-nums text-[var(--fg3)]">{members.length}</span>
+          </span>
+        ),
+        guests: members,
+      };
+    });
+    const ungrouped = guests.filter((g) => !normalizeGroup(g.guest_group));
+    if (ungrouped.length > 0) {
+      sections.push({
+        key: "__ungrouped",
+        isGroup: true,
+        label: `${UNGROUPED_LABEL} (${ungrouped.length})`,
+        guests: ungrouped,
+      });
+    }
+    return sections;
+  }
 
   const order: GuestRsvp[] = ["yes", "pending", "no"];
   return order
     .map((rsvp) => ({
+      key: rsvp,
       label: `${RSVP_LABEL[rsvp]} (${guests.filter((g) => g.rsvp === rsvp).length})`,
       guests: guests.filter((g) => g.rsvp === rsvp),
     }))
@@ -441,12 +530,13 @@ function GuestColumn({
       ) : (
         <div className="flex flex-col gap-4">
           {sections.map((section) => (
-            <ListGroup key={section.label ?? "all"} label={section.label}>
+            <ListGroup key={section.key} label={section.label}>
               {section.guests.map((g) => (
                 <GuestListRow
                   key={g.id}
                   guest={g}
                   compact
+                  hideGroup={section.isGroup}
                   onEdit={() => onEdit(g)}
                   onCycleRsvp={() => onCycleRsvp(g)}
                   onToggleInvited={() => onToggleInvited(g)}
@@ -456,6 +546,115 @@ function GuestColumn({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Groups view — the whole guest list re-cut by group instead of by side, so
+// you can see each circle of people (uni, work, cousins…) as its own card
+// with its own colour and its own RSVP tally.
+// ============================================================================
+
+function GuestGroups({
+  guests, ...handlers
+}: { guests: GuestRow[] } & ColumnHandlers) {
+  const names = collectGroups(guests);
+  const ungrouped = guests.filter((g) => !normalizeGroup(g.guest_group));
+
+  if (guests.length === 0) {
+    return (
+      <div className="rounded-[16px] bg-[var(--card)] px-1 py-16 text-center">
+        <p className="text-[15px] text-[var(--fg2)]">No guests match this filter.</p>
+      </div>
+    );
+  }
+
+  if (names.length === 0) {
+    return (
+      <div className="rounded-[16px] bg-[var(--card)] px-6 py-14 text-center">
+        <p className="text-[17px] text-[var(--fg2)]">No groups yet.</p>
+        <p className="mt-2 text-[15px] text-[var(--fg3)]">
+          Open a guest and give them a group — “Uni friends”, “Work”, “Cousins” — and
+          they’ll gather here, each group with its own colour.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-2">
+      {names.map((name) => (
+        <GuestGroupCard
+          key={name}
+          name={name}
+          guests={guests.filter((g) => normalizeGroup(g.guest_group) === name)}
+          {...handlers}
+        />
+      ))}
+      {ungrouped.length > 0 && (
+        <GuestGroupCard name={null} guests={ungrouped} {...handlers} />
+      )}
+    </div>
+  );
+}
+
+function GuestGroupCard({
+  name, guests, onEdit, onCycleRsvp, onToggleInvited,
+}: { name: string | null; guests: GuestRow[] } & ColumnHandlers) {
+  const color = groupColor(name);
+  const coming = guests.filter((g) => g.rsvp === "yes").length;
+  const pending = guests.filter((g) => g.rsvp === "pending").length;
+  const declined = guests.filter((g) => g.rsvp === "no").length;
+  const plusOnes = guests.filter((g) => g.plus_one).length;
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2.5">
+      <div
+        className="flex flex-col gap-2.5 rounded-[14px] px-[18px] py-3.5"
+        style={{ background: color.tint }}
+      >
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="flex min-w-0 items-center gap-2.5">
+            <span
+              className="h-[10px] w-[10px] flex-none rounded-full"
+              style={{ background: color.solid }}
+            />
+            <span className="truncate text-[17px] font-semibold tracking-[-0.018em]">
+              {name ?? UNGROUPED_LABEL}
+            </span>
+          </span>
+          <span className="flex-none text-[13px] tabular-nums text-[var(--fg2)]">
+            {guests.length} guest{guests.length === 1 ? "" : "s"}
+            {plusOnes > 0 ? ` · +${plusOnes}` : ""}
+          </span>
+        </div>
+
+        <div className="flex h-[5px] overflow-hidden rounded-[3px] bg-[var(--fill)]">
+          <div style={{ width: `${(coming / guests.length) * 100}%`, background: "var(--green)" }} />
+          <div style={{ width: `${(pending / guests.length) * 100}%`, background: "var(--amber)" }} />
+          <div style={{ width: `${(declined / guests.length) * 100}%`, background: "var(--red)" }} />
+        </div>
+
+        <div className="text-[13px] tabular-nums text-[var(--fg2)]">
+          {coming} coming{pending > 0 ? ` · ${pending} pending` : ""}
+          {declined > 0 ? ` · ${declined} declined` : ""}
+        </div>
+      </div>
+
+      <ListGroup>
+        {guests.map((g) => (
+          <GuestListRow
+            key={g.id}
+            guest={g}
+            compact
+            hideGroup
+            onEdit={() => onEdit(g)}
+            onCycleRsvp={() => onCycleRsvp(g)}
+            onToggleInvited={() => onToggleInvited(g)}
+          />
+        ))}
+      </ListGroup>
     </div>
   );
 }
@@ -524,13 +723,18 @@ function GuestAvatar({ guest, onClick }: { guest: GuestRow; onClick: () => void 
     <button
       type="button"
       onClick={onClick}
-      title={`${guest.name} · ${RSVP_LABEL[guest.rsvp]}${guest.plus_one ? ` · plus ${guest.plus_one_name || "one"}` : ""}`}
+      title={[
+        guest.name,
+        RSVP_LABEL[guest.rsvp],
+        normalizeGroup(guest.guest_group),
+        guest.plus_one ? `plus ${guest.plus_one_name || "one"}` : null,
+      ].filter(Boolean).join(" · ")}
       className="guest-avatar relative flex items-center justify-center rounded-full font-semibold transition-transform hover:z-10 hover:scale-110"
       style={{
         width: size,
         height: size,
         fontSize: size * 0.32,
-        background: "var(--fill)",
+        background: groupColor(guest.guest_group).tint,
         color: "var(--fg)",
         boxShadow: `inset 0 0 0 2px ${RSVP_DOT[guest.rsvp]}`,
         "--bob-delay": `${bobDelay}s`,
@@ -574,12 +778,90 @@ function SelectField({
   );
 }
 
+/**
+ * Group picker for the edit card: type any name to create a group, or tap one
+ * that already exists. The dot beside the field previews the colour the group
+ * will wear across the app, which updates as you type.
+ */
+function GroupField({
+  defaultValue, knownGroups,
+}: {
+  defaultValue: string;
+  knownGroups: string[];
+}) {
+  // Remounted per guest by the caller's `key`, so the initial state is enough.
+  const [value, setValue] = useState(defaultValue);
+
+  const current = normalizeGroup(value);
+  const color = groupColor(current);
+  const options = current && !knownGroups.some((g) => g.toLowerCase() === current.toLowerCase())
+    ? [...knownGroups, current]
+    : knownGroups;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label htmlFor="guest_group">Group</Label>
+      <div className="relative">
+        <span
+          className="pointer-events-none absolute top-1/2 left-3 h-[10px] w-[10px] -translate-y-1/2 rounded-full transition-colors"
+          style={{ background: current ? color.solid : "var(--fill)", boxShadow: current ? "none" : "inset 0 0 0 1.5px var(--fg3)" }}
+        />
+        <Input
+          id="guest_group"
+          name="guest_group"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="Uni friends, Work, Cousins…"
+          autoComplete="off"
+          className="pl-7"
+        />
+      </div>
+
+      {(options.length > 0 || current) && (
+        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+          {options.map((g) => {
+            const active = current?.toLowerCase() === g.toLowerCase();
+            const c = groupColor(g);
+            return (
+              <button
+                key={g}
+                type="button"
+                onClick={() => setValue(active ? "" : g)}
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[13px] whitespace-nowrap transition-opacity hover:opacity-70"
+                style={{
+                  background: active ? c.wash : "var(--fill)",
+                  color: "var(--fg)",
+                  boxShadow: active ? `inset 0 0 0 1.5px ${c.solid}` : "none",
+                }}
+              >
+                <span className="h-[6px] w-[6px] rounded-full" style={{ background: c.solid }} />
+                {g}
+              </button>
+            );
+          })}
+          {current && (
+            <button
+              type="button"
+              onClick={() => setValue("")}
+              className="rounded-full px-2.5 py-1 text-[13px] text-[var(--fg2)] transition-opacity hover:opacity-70"
+              style={{ background: "var(--fill)" }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GuestDialog({
-  open, onOpenChange, editing, onDelete,
+  open, onOpenChange, editing, knownGroups, onDelete,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   editing: GuestRow | null;
+  knownGroups: string[];
   onDelete: (g: GuestRow) => void;
 }) {
   const action = editing ? updateGuest.bind(null, editing.id) : createGuest;
@@ -619,6 +901,12 @@ function GuestDialog({
               />
             </div>
           </div>
+
+          <GroupField
+            key={editing?.id ?? "new"}
+            defaultValue={editing?.guest_group ?? ""}
+            knownGroups={knownGroups}
+          />
 
           <div className="grid grid-cols-2 gap-3.5 max-md:grid-cols-1">
             <div className="flex flex-col gap-2">
