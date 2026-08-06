@@ -706,34 +706,15 @@ export function LifeBudgetClient({
             )}
           </ListGroup>
 
-          <div>
-            <div className="px-[18px] pb-[7px] text-[13px] tracking-[-0.004em] text-[var(--fg2)]">Wedding savings</div>
-            <div className="overflow-hidden rounded-[12px] bg-[var(--card)]">
-              <ListRow>
-                <span className="text-[17px] tracking-[-0.014em]">Celal</span>
-                <span className="ml-auto text-[17px] tabular-nums text-[var(--fg2)]">{formatMoney(perPersonStartingCash.groomSaved)}</span>
-              </ListRow>
-              <ListRow>
-                <span className="text-[17px] tracking-[-0.014em]">Selver</span>
-                <span className="ml-auto text-[17px] tabular-nums text-[var(--fg2)]">{formatMoney(perPersonStartingCash.brideSaved)}</span>
-              </ListRow>
-              <ListRow>
-                <span className="text-[17px] tracking-[-0.014em]">Common</span>
-                <span className="ml-auto text-[17px] tabular-nums text-[var(--fg2)]">{formatMoney(perPersonStartingCash.commonSaved)}</span>
-              </ListRow>
-            </div>
-            <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 px-1 text-[15px]">
-              <button type="button" onClick={() => setTransferDialogOpen(true)} className="text-[var(--accent)] hover:opacity-60">
-                Transfer to common
-              </button>
-              <button type="button" onClick={() => setExpandedSavingsOpen(true)} className="text-[var(--accent)] hover:opacity-60">
-                View all
-              </button>
-              <button type="button" onClick={() => setSavingsDialog({ open: true, editing: null })} className="text-[var(--accent)] hover:opacity-60">
-                Log savings
-              </button>
-            </div>
-          </div>
+          <SavingsSection
+            savings={savings}
+            view={view}
+            pots={perPersonStartingCash}
+            onEdit={(s) => setSavingsDialog({ open: true, editing: s })}
+            onAdd={() => setSavingsDialog({ open: true, editing: null })}
+            onTransfer={() => setTransferDialogOpen(true)}
+            onViewAll={() => setExpandedSavingsOpen(true)}
+          />
 
           <div className="flex flex-wrap gap-x-4 gap-y-1 px-1 text-[13px] text-[var(--fg3)]">
             <span>Search a longer list:</span>
@@ -2303,179 +2284,193 @@ function ExpandedPurchasesDialog({ open, onOpenChange, purchases, onEdit, onDele
 }
 
 // ============================================================================
-// Savings pots — three-column visual breakdown
+// Wedding savings — pots, where the money came from, and the recent ledger
 // ============================================================================
 
-function SavingsPots({
-  savings,
-  pots: allocatedPots,
-  onEdit,
-  onDelete,
+/** Entries the current view is about: everyone's in Household, otherwise
+ *  the person's own entries plus the common fund both of them share. */
+function savingsForView(savings: WeddingSavingsRow[], view: LifeView): WeddingSavingsRow[] {
+  if (view === "groom" || view === "bride") {
+    return savings.filter((s) => s.contributor === view || s.contributor === "both");
+  }
+  return savings;
+}
+
+function contributorLabel(c: WeddingSavingsRow["contributor"]): string {
+  return c === "groom" ? "Celal" : c === "bride" ? "Selver" : "Common";
+}
+
+/**
+ * The savings ledger surfaced on the page rather than hidden behind a dialog:
+ * the three pots, a breakdown of where the money came from (Family gift,
+ * Bonus, salaries…) and the latest entries, each tappable to edit. In a
+ * person's view everything narrows to their own entries plus the common fund.
+ */
+function SavingsSection({
+  savings, view, pots, onEdit, onAdd, onTransfer, onViewAll,
 }: {
   savings: WeddingSavingsRow[];
+  view: LifeView;
   pots: { groom: number; bride: number; groomSaved: number; brideSaved: number; commonSaved: number };
   onEdit: (s: WeddingSavingsRow) => void;
-  onDelete: (s: WeddingSavingsRow) => void;
+  onAdd: () => void;
+  onTransfer: () => void;
+  onViewAll: () => void;
 }) {
-  const pots = useMemo(() => {
-    const groomEntries = savings.filter((s) => s.contributor === "groom");
-    const brideEntries = savings.filter((s) => s.contributor === "bride");
-    const commonEntries = savings.filter((s) => s.contributor === "both");
+  const scoped = useMemo(() => savingsForView(savings, view), [savings, view]);
 
-    const groomTotal = groomEntries.reduce((a, s) => a + s.amount, 0);
-    const brideTotal = brideEntries.reduce((a, s) => a + s.amount, 0);
-    const commonTotal = commonEntries.reduce((a, s) => a + s.amount, 0);
+  // Where the money came from — one row per source, biggest first.
+  const bySource = useMemo(() => {
+    const map = new Map<string, number>();
+    scoped.forEach((s) => {
+      const key = s.source?.trim() || "Unspecified";
+      map.set(key, (map.get(key) ?? 0) + Number(s.amount));
+    });
+    return [...map.entries()]
+      .map(([label, amount]) => ({ label, amount }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [scoped]);
 
-    const transferredFromGroom = commonEntries
-      .filter((s) => s.source?.startsWith("Transfer from Groom"))
-      .reduce((a, s) => a + s.amount, 0);
-    const transferredFromBride = commonEntries
-      .filter((s) => s.source?.startsWith("Transfer from Bride"))
-      .reduce((a, s) => a + s.amount, 0);
+  const sourceTotal = bySource.reduce((a, s) => a + s.amount, 0);
 
-    const lastGroom = [...groomEntries].sort((a, b) => b.saved_on.localeCompare(a.saved_on))[0];
-    const lastBride = [...brideEntries].sort((a, b) => b.saved_on.localeCompare(a.saved_on))[0];
-    const lastCommon = [...commonEntries].sort((a, b) => b.saved_on.localeCompare(a.saved_on))[0];
-
-    return { groomTotal, brideTotal, commonTotal, transferredFromGroom, transferredFromBride, lastGroom, lastBride, lastCommon };
-  }, [savings]);
-
-  const grandTotal = pots.groomTotal + pots.brideTotal + pots.commonTotal;
-
-  const recentAll = useMemo(
-    () => [...savings].sort((a, b) => b.saved_on.localeCompare(a.saved_on)).slice(0, 5),
-    [savings]
+  const recent = useMemo(
+    () => [...scoped].sort((a, b) => b.saved_on.localeCompare(a.saved_on)).slice(0, 6),
+    [scoped]
   );
 
-  if (savings.length === 0) {
-    return (
-      <div className="bg-paper border border-dashed border-line rounded-[4px] p-10 text-center text-ink-soft italic text-[14px]">
-        No savings logged yet — click <strong>+ Log savings</strong> to start tracking.
-      </div>
-    );
-  }
+  const actions = (
+    <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 px-1 text-[15px]">
+      <button type="button" onClick={onTransfer} className="text-[var(--accent)] hover:opacity-60">
+        Transfer to common
+      </button>
+      <button type="button" onClick={onViewAll} className="text-[var(--accent)] hover:opacity-60">
+        View all
+      </button>
+      <button type="button" onClick={onAdd} className="text-[var(--accent)] hover:opacity-60">
+        Log savings
+      </button>
+    </div>
+  );
 
   return (
-    <div className="space-y-5">
-      {/* Three pots */}
-      <div className="grid grid-cols-3 gap-5 max-md:grid-cols-1">
-        {/* Groom */}
-        <div className="bg-paper border border-line border-l-[3px] border-l-sage rounded-[4px] p-6 shadow-soft space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="text-[11px] uppercase tracking-[0.3em] font-medium text-sage">Groom</div>
-            <div className="text-[10px] text-ink-soft">{pots.lastGroom ? formatDate(pots.lastGroom.saved_on) : "—"}</div>
-          </div>
-          <div className="font-serif text-[32px] leading-none text-ink"><em>{formatMoney(pots.groomTotal)}</em></div>
-          {grandTotal > 0 && (
-            <div className="h-1.5 bg-cream-deep rounded-full overflow-hidden">
-              <div className="h-full bg-sage rounded-full" style={{ width: `${Math.min(100, (pots.groomTotal / grandTotal) * 100)}%` }} />
-            </div>
-          )}
-          <div className="space-y-1 text-[12px] text-ink-soft">
-            <div>{pots.lastGroom?.source ?? "—"}</div>
-            {pots.transferredFromGroom > 0 && (
-              <div className="flex items-center gap-1 text-gold">
-                <span>⇄</span><span>{formatMoney(pots.transferredFromGroom)} transferred to common</span>
-              </div>
-            )}
-          </div>
-          <div className="pt-3 border-t border-line">
-            <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-0.5">Starting position after wedding</div>
-            <div className="font-mono font-medium text-sage text-[15px]">{formatMoney(allocatedPots.groom)}</div>
-            <div className="text-[10px] text-ink-soft mt-0.5">personal + ½ common − ½ costs</div>
-          </div>
-        </div>
-
-        {/* Bride */}
-        <div className="bg-paper border border-line border-l-[3px] border-l-rose rounded-[4px] p-6 shadow-soft space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="text-[11px] uppercase tracking-[0.3em] font-medium text-rose">Bride</div>
-            <div className="text-[10px] text-ink-soft">{pots.lastBride ? formatDate(pots.lastBride.saved_on) : "—"}</div>
-          </div>
-          <div className="font-serif text-[32px] leading-none text-ink"><em>{formatMoney(pots.brideTotal)}</em></div>
-          {grandTotal > 0 && (
-            <div className="h-1.5 bg-cream-deep rounded-full overflow-hidden">
-              <div className="h-full bg-rose rounded-full" style={{ width: `${Math.min(100, (pots.brideTotal / grandTotal) * 100)}%` }} />
-            </div>
-          )}
-          <div className="space-y-1 text-[12px] text-ink-soft">
-            <div>{pots.lastBride?.source ?? "—"}</div>
-            {pots.transferredFromBride > 0 && (
-              <div className="flex items-center gap-1 text-gold">
-                <span>⇄</span><span>{formatMoney(pots.transferredFromBride)} transferred to common</span>
-              </div>
-            )}
-          </div>
-          <div className="pt-3 border-t border-line">
-            <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-0.5">Starting position after wedding</div>
-            <div className="font-mono font-medium text-rose text-[15px]">{formatMoney(allocatedPots.bride)}</div>
-            <div className="text-[10px] text-ink-soft mt-0.5">personal + ½ common − ½ costs</div>
-          </div>
-        </div>
-
-        {/* Common fund */}
-        <div className="bg-paper border border-line border-l-[3px] border-l-gold rounded-[4px] p-6 shadow-soft space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="text-[11px] uppercase tracking-[0.3em] font-medium text-gold">Common fund</div>
-            <div className="text-[10px] text-ink-soft">{pots.lastCommon ? formatDate(pots.lastCommon.saved_on) : "—"}</div>
-          </div>
-          <div className="font-serif text-[32px] leading-none text-ink"><em>{formatMoney(pots.commonTotal)}</em></div>
-          {grandTotal > 0 && (
-            <div className="h-1.5 bg-cream-deep rounded-full overflow-hidden">
-              <div className="h-full bg-gold rounded-full" style={{ width: `${Math.min(100, (pots.commonTotal / grandTotal) * 100)}%` }} />
-            </div>
-          )}
-          <div className="space-y-1 text-[12px] text-ink-soft">
-            {pots.transferredFromGroom > 0 && <div>From groom: {formatMoney(pots.transferredFromGroom)}</div>}
-            {pots.transferredFromBride > 0 && <div>From bride: {formatMoney(pots.transferredFromBride)}</div>}
-            {pots.transferredFromGroom === 0 && pots.transferredFromBride === 0 && <div>{pots.lastCommon?.source ?? "—"}</div>}
-          </div>
-          {pots.commonTotal > 0 && (
-            <div className="pt-3 border-t border-line">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft mb-1">Split 50/50</div>
-              <div className="flex justify-between text-[12px]">
-                <span className="text-sage">→ Groom {formatMoney(pots.commonTotal * 0.5)}</span>
-                <span className="text-rose">Bride {formatMoney(pots.commonTotal * 0.5)} →</span>
-              </div>
-            </div>
+    <div className="flex flex-col gap-7">
+      <div>
+        <div className="px-[18px] pb-[7px] text-[13px] tracking-[-0.004em] text-[var(--fg2)]">Wedding savings</div>
+        <div className="overflow-hidden rounded-[12px] bg-[var(--card)]">
+          {view === "joint" ? (
+            <>
+              <ListRow>
+                <span className="text-[17px] tracking-[-0.014em]">Celal</span>
+                <span className="ml-auto text-[17px] tabular-nums text-[var(--fg2)]">{formatMoney(pots.groomSaved)}</span>
+              </ListRow>
+              <ListRow>
+                <span className="text-[17px] tracking-[-0.014em]">Selver</span>
+                <span className="ml-auto text-[17px] tabular-nums text-[var(--fg2)]">{formatMoney(pots.brideSaved)}</span>
+              </ListRow>
+              <ListRow>
+                <span className="text-[17px] tracking-[-0.014em]">Common</span>
+                <span className="ml-auto text-[17px] tabular-nums text-[var(--fg2)]">{formatMoney(pots.commonSaved)}</span>
+              </ListRow>
+            </>
+          ) : (
+            <>
+              <ListRow>
+                <span className="text-[17px] tracking-[-0.014em]">
+                  {view === "groom" ? "Celal" : "Selver"}&rsquo;s own
+                </span>
+                <span className="ml-auto text-[17px] tabular-nums text-[var(--fg2)]">
+                  {formatMoney(view === "groom" ? pots.groomSaved : pots.brideSaved)}
+                </span>
+              </ListRow>
+              <ListRow>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[17px] tracking-[-0.014em]">Half of common</div>
+                  <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)]">
+                    {formatMoney(pots.commonSaved)} split 50/50
+                  </div>
+                </div>
+                <span className="ml-auto text-[17px] tabular-nums text-[var(--fg2)]">{formatMoney(pots.commonSaved * 0.5)}</span>
+              </ListRow>
+              <ListRow>
+                <span className="text-[17px] tracking-[-0.014em]">Starts with</span>
+                <span className="ml-auto text-[17px] tabular-nums">
+                  {formatMoney(view === "groom" ? pots.groom : pots.bride)}
+                </span>
+              </ListRow>
+            </>
           )}
         </div>
+        {actions}
       </div>
 
-      {/* Recent entries */}
-      <div className="bg-paper border border-line rounded-[4px] shadow-soft overflow-hidden">
-        <div className="px-6 py-3 border-b border-line bg-cream/40 text-[11px] uppercase tracking-[0.2em] text-ink-soft font-medium">
-          Recent entries
-        </div>
-        <div className="divide-y divide-line">
-          {recentAll.map((s) => (
-            <div
-              key={s.id}
-              className="group flex items-center gap-4 px-6 py-3.5 hover:bg-cream/30 transition-colors cursor-pointer"
-              onClick={() => onEdit(s)}
-            >
-              <div className="text-[18px]">{s.contributor === "groom" ? "👨" : s.contributor === "bride" ? "👰" : "💑"}</div>
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-ink text-[13px] truncate">{s.source ?? "Savings"}</div>
-                <div className="text-[11px] text-ink-soft">{formatDate(s.saved_on)}{s.notes && ` · ${s.notes}`}</div>
+      {sourceTotal > 0 && (
+        <ListGroup label="Where the savings came from">
+          <div className="flex flex-col gap-3 px-[18px] pt-4 pb-[18px]">
+            {bySource.map((s) => (
+              <div key={s.label}>
+                <div className="flex items-baseline justify-between gap-3 text-[15px] tracking-[-0.01em]">
+                  <span className="truncate">{s.label}</span>
+                  <span className="tabular-nums whitespace-nowrap">
+                    {formatMoney(s.amount)}
+                    <span className="ml-2 text-[13px] text-[var(--fg3)]">
+                      {Math.round((s.amount / sourceTotal) * 100)}%
+                    </span>
+                  </span>
+                </div>
+                <div className="mt-1.5 h-[6px] overflow-hidden rounded-[3px] bg-[var(--fill)]">
+                  <div
+                    className="h-full rounded-[3px]"
+                    style={{ width: `${(s.amount / sourceTotal) * 100}%`, background: "var(--green)" }}
+                  />
+                </div>
               </div>
-              <span className={`text-[9px] uppercase tracking-[0.15em] px-2 py-0.5 rounded-full border shrink-0 ${
-                s.contributor === "groom" ? "border-sage/50 text-sage bg-sage/10" :
-                s.contributor === "bride" ? "border-rose/50 text-rose bg-rose/10" :
-                "border-gold/50 text-gold bg-gold/10"
-              }`}>
-                {s.contributor === "both" ? "Common" : s.contributor}
-              </span>
-              <div className="font-mono text-[13px] text-sage font-medium">+{formatMoney(s.amount)}</div>
-              <button
-                type="button"
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-ink-soft hover:text-burgundy"
-                onClick={(e) => { e.stopPropagation(); onDelete(s); }}
-              >×</button>
-            </div>
-          ))}
-        </div>
-      </div>
+            ))}
+          </div>
+        </ListGroup>
+      )}
+
+      <ListGroup
+        label={
+          <div className="flex items-center justify-between">
+            <span>Savings ledger</span>
+            <button type="button" onClick={onAdd} className="text-[var(--accent)] hover:opacity-60">
+              + Log
+            </button>
+          </div>
+        }
+      >
+        {recent.length === 0 ? (
+          <ListRow>
+            <span className="text-[15px] text-[var(--fg2)]">
+              No savings logged yet — tap <strong>Log savings</strong> to start tracking.
+            </span>
+          </ListRow>
+        ) : (
+          <>
+            {recent.map((s) => (
+              <ListRow key={s.id} as="button" interactive onClick={() => onEdit(s)}>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[17px] tracking-[-0.014em] truncate">{s.source ?? "Savings"}</div>
+                  <div className="mt-0.5 text-[14px] tracking-[-0.008em] text-[var(--fg2)] truncate">
+                    {contributorLabel(s.contributor)} · {formatDate(s.saved_on)}
+                    {s.notes ? ` · ${s.notes}` : ""}
+                  </div>
+                </div>
+                <span className="ml-auto text-[17px] tabular-nums whitespace-nowrap" style={{ color: "var(--green)" }}>
+                  +{formatMoney(s.amount)}
+                </span>
+              </ListRow>
+            ))}
+            {scoped.length > recent.length && (
+              <ListRow as="button" interactive onClick={onViewAll}>
+                <span className="text-[15px] text-[var(--accent)]">
+                  View all {scoped.length} entries
+                </span>
+              </ListRow>
+            )}
+          </>
+        )}
+      </ListGroup>
     </div>
   );
 }
