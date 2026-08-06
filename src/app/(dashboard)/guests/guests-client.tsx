@@ -17,6 +17,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { ActionError } from "@/components/action-error";
 import { createGuest, deleteGuest, updateGuest } from "./actions";
 import {
   collectGroups, groupColor, guestsInGroup, normalizeGroup, UNGROUPED_LABEL,
@@ -86,6 +87,7 @@ export function GuestsClient({ initialGuests }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<GuestRow | null>(null);
   const [, startTransition] = useTransition();
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -137,8 +139,15 @@ export function GuestsClient({ initialGuests }: Props) {
 
   const handleDelete = (g: GuestRow) => {
     if (!confirm(`Delete "${g.name}"?`)) return;
+    const rollback = guests;
     setGuests((prev) => prev.filter((x) => x.id !== g.id));
-    startTransition(() => { deleteGuest(g.id); });
+    startTransition(async () => {
+      const { error } = await deleteGuest(g.id);
+      if (error) {
+        setGuests(rollback);
+        setActionError(error);
+      }
+    });
   };
 
   /** Optimistically patch one field and persist via the existing updateGuest
@@ -187,6 +196,8 @@ export function GuestsClient({ initialGuests }: Props) {
           <span aria-hidden>›</span>
         </Link>
       </div>
+
+      <ActionError message={actionError} onDismiss={() => setActionError(null)} />
 
       <div className="flex flex-wrap items-center gap-3">
         <Input
@@ -818,7 +829,14 @@ function SelectField({
   options: { value: string; label: string }[];
 }) {
   const [value, setValue] = useState(defaultValue);
-  useEffect(() => { setValue(defaultValue); }, [defaultValue]);
+  // Re-sync when the dialog is reused for a different row. Adjusting state
+  // during render is cheaper than an effect: React re-runs this component
+  // before committing, so the stale value never reaches the DOM.
+  const [syncedDefault, setSyncedDefault] = useState(defaultValue);
+  if (syncedDefault !== defaultValue) {
+    setSyncedDefault(defaultValue);
+    setValue(defaultValue);
+  }
   return (
     <>
       <input type="hidden" name={name} value={value} />

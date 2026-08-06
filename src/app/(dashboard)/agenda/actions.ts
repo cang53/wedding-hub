@@ -62,5 +62,7 @@ export async function updateAgendaEvent(id: string, _prev: unknown, form: FormDa
 
 export async function deleteAgendaEvent(id: string) {
   const supabase = createSupabaseServerClient();
-  await supabase.from("agenda").delete().eq("id", id);
+  const { error } = await supabase.from("agenda").delete().eq("id", id);
+  if (error) return { error: error.message };
+  return {};
 }

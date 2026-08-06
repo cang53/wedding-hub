@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ActionError } from "@/components/action-error";
 import { createTodo, deleteTodo, toggleTodo, updateTodo } from "./actions";
 
 const PRIORITY_ORDER: Record<TodoPriority, number> = { high: 0, medium: 1, low: 2 };
@@ -93,16 +94,34 @@ export function TodoClient({ initialTodos }: Props) {
   }, [todos, search, categoryFilter, statusFilter]);
 
   const [, startTransition] = useTransition();
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const handleToggle = (todo: TodoRow) => {
-    setTodos((prev) => prev.map((t) => (t.id === todo.id ? { ...t, done: !t.done } : t)));
-    startTransition(() => { toggleTodo(todo.id, !todo.done); });
+    // Optimistic flip — realtime will reconfirm with the same value.
+    const rollback = todos;
+    setTodos((prev) =>
+      prev.map((t) => (t.id === todo.id ? { ...t, done: !t.done } : t))
+    );
+    startTransition(async () => {
+      const { error } = await toggleTodo(todo.id, !todo.done);
+      if (error) {
+        setTodos(rollback);
+        setActionError(error);
+      }
+    });
   };
 
   const handleDelete = (todo: TodoRow) => {
     if (!confirm(`Delete "${todo.text}"?`)) return;
+    const rollback = todos;
     setTodos((prev) => prev.filter((t) => t.id !== todo.id));
-    startTransition(() => { deleteTodo(todo.id); });
+    startTransition(async () => {
+      const { error } = await deleteTodo(todo.id);
+      if (error) {
+        setTodos(rollback);
+        setActionError(error);
+      }
+    });
   };
 
   const handleEdit = (todo: TodoRow) => { setEditing(todo); setDialogOpen(true); };
@@ -112,6 +131,8 @@ export function TodoClient({ initialTodos }: Props) {
 
   return (
     <section className="font-apple flex flex-col gap-6 text-[var(--fg)]">
+      <ActionError message={actionError} onDismiss={() => setActionError(null)} />
+
       <div className="flex flex-wrap items-center gap-3">
         <Input
           type="search"
@@ -281,7 +302,16 @@ function SelectFormField({
   options: { value: string; label: string }[];
 }) {
   const [value, setValue] = useState(defaultValue);
-  useEffect(() => { setValue(defaultValue); }, [defaultValue]);
+
+  // Keep the controlled value in sync when `defaultValue` (prop) changes,
+  // e.g. when opening the dialog to edit a different todo. Adjusting state
+  // during render is cheaper than an effect: React re-runs this component
+  // before committing, so the stale value never reaches the DOM.
+  const [syncedDefault, setSyncedDefault] = useState(defaultValue);
+  if (syncedDefault !== defaultValue) {
+    setSyncedDefault(defaultValue);
+    setValue(defaultValue);
+  }
   return (
     <>
       <input type="hidden" name={name} value={value} />

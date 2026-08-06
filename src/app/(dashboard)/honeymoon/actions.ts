@@ -100,14 +100,15 @@ export async function duplicateScenario(id: string): Promise<Result<ScenarioWith
   if (insErr || !created) return { error: insErr?.message ?? "Copy failed" };
   const newScenario = created as TripScenarioRow;
 
-  const { data: stages } = await supabase
+  const { data: stages, error: stagesErr } = await supabase
     .from("trip_stages")
     .select("*")
     .eq("scenario_id", id)
     .order("order_index", { ascending: true });
+  if (stagesErr) return { error: stagesErr.message };
 
   for (const stage of (stages ?? []) as TripStageRow[]) {
-    const { data: newStage } = await supabase
+    const { data: newStage, error: stageErr } = await supabase
       .from("trip_stages")
       .insert({
         scenario_id: newScenario.id,
@@ -122,12 +123,15 @@ export async function duplicateScenario(id: string): Promise<Result<ScenarioWith
       } as never)
       .select()
       .single();
-    if (!newStage) continue;
+    // Bail rather than continue: a silently skipped stage produces a copy
+    // that looks complete but is missing part of the itinerary.
+    if (stageErr || !newStage) return { error: stageErr?.message ?? "Copying a stage failed" };
 
-    const { data: accs } = await supabase
+    const { data: accs, error: accsErr } = await supabase
       .from("stage_accommodations")
       .select("*")
       .eq("stage_id", stage.id);
+    if (accsErr) return { error: accsErr.message };
 
     const rows = ((accs ?? []) as StageAccommodationRow[]).map((a) => ({
       stage_id: (newStage as TripStageRow).id,
@@ -149,17 +153,22 @@ export async function duplicateScenario(id: string): Promise<Result<ScenarioWith
       image_url: a.image_url,
     }));
     if (rows.length > 0) {
-      await supabase.from("stage_accommodations").insert(rows as never);
+      const { error: accInsErr } = await supabase.from("stage_accommodations").insert(rows as never);
+      if (accInsErr) return { error: accInsErr.message };
     }
   }
 
   // Return the full nested clone so the client can render it immediately.
-  const { data: tree } = await supabase
+  const { data: tree, error: treeErr } = await supabase
     .from("trip_scenarios")
     .select("*, stages:trip_stages(*, accommodations:stage_accommodations(*))")
     .eq("id", newScenario.id)
     .order("order_index", { referencedTable: "trip_stages", ascending: true })
     .single();
+
+  // The clone itself succeeded by this point; if only the read-back failed,
+  // hand back the bare scenario so the client still shows the new copy.
+  if (treeErr && !tree) return { ok: true as const, data: { ...newScenario, stages: [] } as ScenarioWithStages };
 
   return { ok: true as const, data: (tree ?? { ...newScenario, stages: [] }) as ScenarioWithStages };
 }
@@ -207,11 +216,15 @@ export async function deleteStage(id: string): Promise<VoidResult> {
 /** Persist a new stage order. `orderedIds` is the full list top-to-bottom. */
 export async function reorderStages(orderedIds: string[]): Promise<VoidResult> {
   const supabase = createSupabaseServerClient();
-  await Promise.all(
+  const results = await Promise.all(
     orderedIds.map((id, index) =>
       supabase.from("trip_stages").update({ order_index: index } as never).eq("id", id),
     ),
   );
+  // A partial failure leaves the order half-applied, so report the first one
+  // rather than letting the client believe the reorder stuck.
+  const failed = results.find((r) => r.error);
+  if (failed?.error) return { error: failed.error.message };
   return { ok: true as const };
 }
 

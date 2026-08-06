@@ -51,7 +51,9 @@ export async function updateSavingEntry(id: string, _prev: unknown, form: FormDa
   return { ok: true as const, data };
 }
 
-export async function deleteSavingEntry(id: string) {
+export async function deleteSavingEntry(id: string): Promise<{ error?: string }> {
   const supabase = createSupabaseServerClient();
-  await supabase.from("wedding_savings").delete().eq("id", id);
+  const { error } = await supabase.from("wedding_savings").delete().eq("id", id);
+  if (error) return { error: error.message };
+  return {};
 }

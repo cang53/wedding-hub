@@ -15,6 +15,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { ActionError } from "@/components/action-error";
 import { createApartment, deleteApartment, updateApartment } from "./actions";
 
 const STATUS_OPTIONS: { value: ApartmentStatus; label: string }[] = [
@@ -37,6 +38,7 @@ export function ApartmentsClient({ initialItems }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ApartmentRow | null>(null);
   const [, startTransition] = useTransition();
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -62,14 +64,23 @@ export function ApartmentsClient({ initialItems }: Props) {
 
   const handleDelete = (item: ApartmentRow) => {
     if (!confirm(`Delete "${item.title}"?`)) return;
+    const rollback = items;
     setItems((prev) => prev.filter((i) => i.id !== item.id));
-    startTransition(() => { deleteApartment(item.id); });
+    startTransition(async () => {
+      const { error } = await deleteApartment(item.id);
+      if (error) {
+        setItems(rollback);
+        setActionError(error);
+      }
+    });
   };
 
   usePageHeader("New listing", () => { setEditing(null); setDialogOpen(true); });
 
   return (
     <section className="font-apple flex flex-col gap-6 text-[var(--fg)]">
+      <ActionError message={actionError} onDismiss={() => setActionError(null)} />
+
       {items.length === 0 ? (
         <div className="px-1 py-16 text-center">
           <p className="text-[17px] text-[var(--fg2)]">No listings yet.</p>
@@ -143,7 +154,14 @@ function SelectField({
   options: { value: string; label: string }[];
 }) {
   const [value, setValue] = useState(defaultValue);
-  useEffect(() => { setValue(defaultValue); }, [defaultValue]);
+  // Re-sync when the dialog is reused for a different row. Adjusting state
+  // during render is cheaper than an effect: React re-runs this component
+  // before committing, so the stale value never reaches the DOM.
+  const [syncedDefault, setSyncedDefault] = useState(defaultValue);
+  if (syncedDefault !== defaultValue) {
+    setSyncedDefault(defaultValue);
+    setValue(defaultValue);
+  }
   return (
     <>
       <input type="hidden" name={name} value={value} />

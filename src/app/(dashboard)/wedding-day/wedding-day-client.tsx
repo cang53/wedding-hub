@@ -15,6 +15,8 @@ import { Segmented } from "@/components/ui/segmented";
 import { usePageHeader } from "@/components/shell/header-context";
 import { WEDDING_DATE } from "@/lib/config";
 import { daysUntil } from "@/lib/utils";
+import { ActionError } from "@/components/action-error";
+import { useWeddingRole, type WeddingRole } from "@/lib/use-wedding-role";
 import { createWeddingDayEvent, deleteWeddingDayEvent, updateWeddingDayEvent } from "./actions";
 
 // ============================================================================
@@ -150,12 +152,19 @@ export function WeddingDayClient({ initialItems }: Props) {
   const [editing, setEditing] = useState<WeddingDayEventRow | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("all");
   const [, startTransition] = useTransition();
+  const [actionError, setActionError] = useState<string | null>(null);
   const [now, setNow] = useState<Date | null>(null);
 
-  useEffect(() => {
-    const role = localStorage.getItem("wedding-role") as ViewMode | null;
-    if (role === "bride" || role === "groom") setViewMode(role);
-  }, []);
+  // Default the view to whichever role was picked on the landing page. The
+  // role arrives after hydration (it lives in localStorage), so adjust state
+  // during render on the pass where it first appears rather than in an
+  // effect. Later clicks on the view tabs override it freely.
+  const role = useWeddingRole();
+  const [appliedRole, setAppliedRole] = useState<WeddingRole | null>(null);
+  if (role !== appliedRole) {
+    setAppliedRole(role);
+    if (role) setViewMode(role);
+  }
 
   useEffect(() => {
     const updateNow = () => setNow(new Date());
@@ -221,8 +230,15 @@ export function WeddingDayClient({ initialItems }: Props) {
 
   const handleDelete = (item: WeddingDayEventRow) => {
     if (!confirm(`Delete "${item.title}"?`)) return;
+    const rollback = items;
     setItems((prev) => prev.filter((i) => i.id !== item.id));
-    startTransition(() => { deleteWeddingDayEvent(item.id); });
+    startTransition(async () => {
+      const { error } = await deleteWeddingDayEvent(item.id);
+      if (error) {
+        setItems(rollback);
+        setActionError(error);
+      }
+    });
   };
 
   const handleApplyTemplate = async (template: Template) => {
@@ -257,6 +273,8 @@ export function WeddingDayClient({ initialItems }: Props) {
 
   return (
     <section className="font-apple flex flex-col gap-[26px] text-[var(--fg)]">
+      <ActionError message={actionError} onDismiss={() => setActionError(null)} />
+
       <Segmented options={VIEW_OPTIONS} value={viewMode} onChange={setViewMode} />
 
       {sorted.length > 0 && (

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition, useActionState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { useNow } from "@/lib/use-now";
 import type { AgendaRow } from "@/types/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ActionError } from "@/components/action-error";
 import {
   createAgendaEvent,
   deleteAgendaEvent,
@@ -68,8 +70,11 @@ export function AgendaClient({ initialEvents }: Props) {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  // ---- Sort: upcoming ascending, then past descending -----------------------
+
+  const now = useNow();
+
   const sorted = useMemo(() => {
-    const now = Date.now();
     const upcoming = events
       .filter((e) => new Date(e.date).getTime() >= now - 24 * 60 * 60 * 1000)
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -77,14 +82,22 @@ export function AgendaClient({ initialEvents }: Props) {
       .filter((e) => new Date(e.date).getTime() < now - 24 * 60 * 60 * 1000)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return [...upcoming, ...past];
-  }, [events]);
+  }, [events, now]);
 
   const [, startTransition] = useTransition();
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const handleDelete = (event: AgendaRow) => {
     if (!confirm(`Delete "${event.title}"?`)) return;
+    const rollback = events;
     setEvents((prev) => prev.filter((e) => e.id !== event.id));
-    startTransition(() => { deleteAgendaEvent(event.id); });
+    startTransition(async () => {
+      const { error } = await deleteAgendaEvent(event.id);
+      if (error) {
+        setEvents(rollback);
+        setActionError(error);
+      }
+    });
   };
 
   const handleEdit = (event: AgendaRow) => { setEditing(event); setDialogOpen(true); };
@@ -94,6 +107,8 @@ export function AgendaClient({ initialEvents }: Props) {
 
   return (
     <section className="font-apple flex flex-col gap-6 text-[var(--fg)]">
+      <ActionError message={actionError} onDismiss={() => setActionError(null)} />
+
       {sorted.length === 0 ? (
         <div className="px-1 py-16 text-center">
           <p className="text-[17px] text-[var(--fg2)]">No events scheduled yet.</p>
@@ -128,7 +143,9 @@ function AgendaItem({
   const day = event.all_day ? allDayParts.day : d.getDate();
   const month = event.all_day ? allDayParts.month : d.toLocaleDateString("en-GB", { month: "short" });
   const time = event.all_day ? null : d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-  const isPast = d.getTime() < Date.now() - 24 * 60 * 60 * 1000;
+
+  const now = useNow();
+  const isPast = d.getTime() < now - 24 * 60 * 60 * 1000;
 
   return (
     <ListRow align="start" interactive className="group" style={isPast ? { opacity: 0.55 } : undefined}>

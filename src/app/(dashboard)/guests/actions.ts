@@ -58,5 +58,7 @@ export async function updateGuest(id: string, _prev: unknown, form: FormData) {
 
 export async function deleteGuest(id: string) {
   const supabase = createSupabaseServerClient();
-  await supabase.from("guests").delete().eq("id", id);
+  const { error } = await supabase.from("guests").delete().eq("id", id);
+  if (error) return { error: error.message };
+  return {};
 }

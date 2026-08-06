@@ -30,6 +30,9 @@ describe("TodoClient optimistic updates", () => {
     vi.resetAllMocks();
     // auto-confirm delete dialogs
     vi.stubGlobal("confirm", () => true);
+    // Actions resolve to {} on success — the client destructures `error`.
+    vi.mocked(deleteTodo).mockResolvedValue({});
+    vi.mocked(toggleTodo).mockResolvedValue({});
   });
 
   it("optimistically removes a todo when deleted", async () => {
@@ -93,5 +96,59 @@ describe("TodoClient optimistic updates", () => {
     await waitFor(() => {
       expect(toggleTodo).toHaveBeenCalledWith("3", true);
     });
+  });
+
+  it("restores the todo and shows the error when the delete fails", async () => {
+    vi.mocked(deleteTodo).mockResolvedValue({ error: "network is down" });
+
+    const todos: TodoRow[] = [
+      {
+        id: "4",
+        text: "Keep me",
+        category: "wedding",
+        priority: "high",
+        done: false,
+        due_date: null,
+        updated_at: "",
+        created_at: "",
+      },
+    ];
+
+    render(<TodoClient initialTodos={todos} />);
+
+    await userEvent.click(screen.getByLabelText("Delete task"));
+
+    // Optimistically removed, then put back once the action reports failure.
+    await waitFor(() => {
+      expect(screen.getByText("Keep me")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("network is down");
+  });
+
+  it("reverts the checkbox when the toggle fails", async () => {
+    vi.mocked(toggleTodo).mockResolvedValue({ error: "write rejected" });
+
+    const todos: TodoRow[] = [
+      {
+        id: "5",
+        text: "Toggle me back",
+        category: "personal",
+        priority: "low",
+        done: false,
+        due_date: null,
+        updated_at: "",
+        created_at: "",
+      },
+    ];
+
+    render(<TodoClient initialTodos={todos} />);
+
+    const checkbox = screen.getByLabelText("Mark as done") as HTMLInputElement;
+    await userEvent.click(checkbox);
+
+    await waitFor(() => {
+      expect(checkbox).not.toBeChecked();
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("write rejected");
   });
 });

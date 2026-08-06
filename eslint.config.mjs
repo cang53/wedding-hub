@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Design reference material uploaded directly to the repo root, not
+    // app source — support.js is actually an HTML export mislabeled .js.
+    "support.js",
+    "*.dc.html",
   ]),
 ]);
 

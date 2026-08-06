@@ -20,6 +20,10 @@ import * as api from "./actions";
 interface PlannerApi {
   scenarios: ScenarioWithStages[];
 
+  /** Message from the last failed write, or null. */
+  error: string | null;
+  dismissError: () => void;
+
   addScenario: () => Promise<string | undefined>;
   duplicate: (id: string) => Promise<string | undefined>;
   patchScenario: (id: string, patch: Partial<TripScenarioRow>) => void;
@@ -58,6 +62,29 @@ export function PlannerProvider({
   children: React.ReactNode;
 }) {
   const [scenarios, setScenarios] = useState<ScenarioWithStages[]>(initialScenarios);
+  const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Fire an optimistic write and reconcile the outcome.
+   *
+   * These used to be `void api.x(...)`, which meant a rejected write left the
+   * optimistic edit on screen looking saved until the next reload. Rolling the
+   * whole tree back to `snapshot` is coarse but correct — the planner's state
+   * is one nested structure, so there's no smaller unit to restore.
+   */
+  const run = (
+    snapshot: ScenarioWithStages[],
+    op: Promise<{ error: string } | { ok: true }>,
+  ) => {
+    void op.then((res) => {
+      if ("error" in res) {
+        setScenarios(snapshot);
+        setError(res.error);
+      }
+    });
+  };
+
+  const dismissError = () => setError(null);
 
   // -- small helpers to update nested state immutably ----------------------
   const mapScenario = (id: string, fn: (s: ScenarioWithStages) => ScenarioWithStages) =>
@@ -80,37 +107,40 @@ export function PlannerProvider({
       name: `Scenario ${String.fromCharCode(65 + scenarios.length)}`,
       color,
     });
-    if (!("ok" in res)) return undefined;
+    if (!("ok" in res)) { setError(res.error); return undefined; }
     setScenarios((prev) => [...prev, { ...res.data, stages: [] }]);
     return res.data.id;
   };
 
   const duplicate: PlannerApi["duplicate"] = async (id) => {
     const res = await api.duplicateScenario(id);
-    if (!("ok" in res)) return undefined;
+    if (!("ok" in res)) { setError(res.error); return undefined; }
     setScenarios((prev) => [...prev, { ...res.data, stages: res.data.stages ?? [] }]);
     return res.data.id;
   };
 
   const patchScenario: PlannerApi["patchScenario"] = (id, patch) => {
+    const snapshot = scenarios;
     mapScenario(id, (s) => ({ ...s, ...patch }));
-    void api.updateScenario(id, patch);
+    run(snapshot, api.updateScenario(id, patch));
   };
 
   const removeScenario: PlannerApi["removeScenario"] = (id) => {
+    const snapshot = scenarios;
     setScenarios((prev) => prev.filter((s) => s.id !== id));
-    void api.deleteScenario(id);
+    run(snapshot, api.deleteScenario(id));
   };
 
   const selectFinal: PlannerApi["selectFinal"] = (id) => {
+    const snapshot = scenarios;
     setScenarios((prev) => prev.map((s) => ({ ...s, is_selected: s.id === id })));
-    void api.selectScenarioAsFinal(id);
+    run(snapshot, api.selectScenarioAsFinal(id));
   };
 
   // -- stages --------------------------------------------------------------
   const addStage: PlannerApi["addStage"] = async (scenarioId) => {
     const res = await api.createStage(scenarioId, { name: "New stage", nights: 1 });
-    if (!("ok" in res)) return;
+    if (!("ok" in res)) { setError(res.error); return; }
     mapScenario(scenarioId, (s) => ({
       ...s,
       stages: [...s.stages, { ...res.data, accommodations: [] }],
@@ -118,19 +148,22 @@ export function PlannerProvider({
   };
 
   const patchStage: PlannerApi["patchStage"] = (scenarioId, stageId, patch) => {
+    const snapshot = scenarios;
     mapStage(scenarioId, stageId, (st) => ({ ...st, ...patch }));
-    void api.updateStage(stageId, patch);
+    run(snapshot, api.updateStage(stageId, patch));
   };
 
   const removeStage: PlannerApi["removeStage"] = (scenarioId, stageId) => {
+    const snapshot = scenarios;
     mapScenario(scenarioId, (s) => ({
       ...s,
       stages: s.stages.filter((st) => st.id !== stageId),
     }));
-    void api.deleteStage(stageId);
+    run(snapshot, api.deleteStage(stageId));
   };
 
   const reorder: PlannerApi["reorder"] = (scenarioId, orderedIds) => {
+    const snapshot = scenarios;
     mapScenario(scenarioId, (s) => {
       const byId = new Map(s.stages.map((st) => [st.id, st]));
       const stages = orderedIds
@@ -141,13 +174,13 @@ export function PlannerProvider({
         .filter((x): x is StageWithAccommodations => x !== null);
       return { ...s, stages };
     });
-    void api.reorderStages(orderedIds);
+    run(snapshot, api.reorderStages(orderedIds));
   };
 
   // -- accommodations ------------------------------------------------------
   const addAccommodation: PlannerApi["addAccommodation"] = async (scenarioId, stageId) => {
     const res = await api.createAccommodation(stageId, { name: "New option", platform: "Booking" });
-    if (!("ok" in res)) return;
+    if (!("ok" in res)) { setError(res.error); return; }
     mapStage(scenarioId, stageId, (st) => ({
       ...st,
       accommodations: [...st.accommodations, res.data],
@@ -160,31 +193,36 @@ export function PlannerProvider({
     accId,
     patch,
   ) => {
+    const snapshot = scenarios;
     mapStage(scenarioId, stageId, (st) => ({
       ...st,
       accommodations: st.accommodations.map((a) => (a.id === accId ? { ...a, ...patch } : a)),
     }));
-    void api.updateAccommodation(accId, patch);
+    run(snapshot, api.updateAccommodation(accId, patch));
   };
 
   const removeAccommodation: PlannerApi["removeAccommodation"] = (scenarioId, stageId, accId) => {
+    const snapshot = scenarios;
     mapStage(scenarioId, stageId, (st) => ({
       ...st,
       accommodations: st.accommodations.filter((a) => a.id !== accId),
     }));
-    void api.deleteAccommodation(accId);
+    run(snapshot, api.deleteAccommodation(accId));
   };
 
   const choose: PlannerApi["choose"] = (scenarioId, stageId, accId) => {
+    const snapshot = scenarios;
     mapStage(scenarioId, stageId, (st) => ({
       ...st,
       accommodations: st.accommodations.map((a) => ({ ...a, is_chosen: a.id === accId })),
     }));
-    void api.chooseAccommodation(stageId, accId);
+    run(snapshot, api.chooseAccommodation(stageId, accId));
   };
 
   const value: PlannerApi = {
     scenarios,
+    error,
+    dismissError,
     addScenario,
     duplicate,
     patchScenario,

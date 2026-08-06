@@ -198,7 +198,12 @@ function MonthSelect({ name, defaultValue, placeholder = "Select month…", requ
   // Internal value uses NO_MONTH as the sentinel for "no selection";
   // the hidden input that the form submits stores "" instead.
   const [value, setValue] = useState<string>(defaultValue ? defaultValue : NO_MONTH);
-  useEffect(() => { setValue(defaultValue ? defaultValue : NO_MONTH); }, [defaultValue]);
+  // Re-sync when the dialog is reused for a different row — see SelectField.
+  const [syncedDefault, setSyncedDefault] = useState(defaultValue);
+  if (syncedDefault !== defaultValue) {
+    setSyncedDefault(defaultValue);
+    setValue(defaultValue ? defaultValue : NO_MONTH);
+  }
 
   const submittedValue = value === NO_MONTH ? "" : value;
 
@@ -305,7 +310,11 @@ export function LifeBudgetClient({
     const months = monthsList(settings.start_month, settings.horizon_months);
     let cumulative = startingCash;
 
-    const series = months.map((month) => {
+    // Written as a loop rather than .map() because each row's `cumulative`
+    // carries over from the previous one — a running total mutated inside a
+    // map callback reads as a side effect during render.
+    const series = [];
+    for (const month of months) {
       const monthIncome = income
         .filter((i) => isActiveInMonth(i.start_month, i.end_month, month))
         .reduce((a, i) => a + Number(i.amount), 0);
@@ -322,8 +331,8 @@ export function LifeBudgetClient({
       const net = monthIncome - totalOut;
       cumulative += net;
 
-      return { month, income: monthIncome, fixed: monthFixed, purchases: monthPurchases, net, cumulative };
-    });
+      series.push({ month, income: monthIncome, fixed: monthFixed, purchases: monthPurchases, net, cumulative });
+    }
 
     return series;
   }, [income, expenses, purchases, settings, startingCash]);
@@ -379,8 +388,12 @@ export function LifeBudgetClient({
   };
   const handleToggleScheduled = (item: LifePurchaseRow) => {
     const next = !item.scheduled;
-    setPurchases((prev) => prev.map((p) => (p.id === item.id ? { ...p, scheduled: next } : p)));
-    startTransition(() => { togglePurchaseScheduled(item.id, next); });
+    const prev = purchases;
+    setPurchases((p) => p.map((x) => (x.id === item.id ? { ...x, scheduled: next } : x)));
+    startTransition(async () => {
+      const res = await togglePurchaseScheduled(item.id, next);
+      if (res?.error) { setPurchases(prev); setErrorBanner(res.error); }
+    });
   };
   const handleDeleteSaving = (item: WeddingSavingsRow) => {
     setErrorBanner(null);
@@ -392,7 +405,8 @@ export function LifeBudgetClient({
         setSavings((p) => p.filter((i) => i.id !== item.id));
         setConfirmState((s) => ({ ...s, open: false }));
         startTransition(async () => {
-          await deleteSavingEntry(item.id);
+          const res = await deleteSavingEntry(item.id);
+          if (res?.error) { setSavings(prev); setErrorBanner(res.error); }
         });
       },
     });
@@ -400,12 +414,21 @@ export function LifeBudgetClient({
 
   // ---- Assign day of month (calendar drag-and-drop) -----------------------
   const handleAssignDay = (type: "income" | "expense" | "purchase", id: string, day: number | null) => {
+    const prevIncome = income;
+    const prevExpenses = expenses;
+    const prevPurchases = purchases;
     if (type === "income") setIncome((prev) => prev.map((i) => i.id === id ? { ...i, day_of_month: day } : i));
     else if (type === "expense") setExpenses((prev) => prev.map((e) => e.id === id ? { ...e, day_of_month: day } : e));
     else setPurchases((prev) => prev.map((p) => p.id === id ? { ...p, day_of_month: day } : p));
-    startTransition(() => {
+    startTransition(async () => {
       const table = type === "income" ? "life_income" : type === "expense" ? "life_expenses" : "life_purchases";
-      assignDayOfMonth(table, id, day);
+      const res = await assignDayOfMonth(table, id, day);
+      if (res?.error) {
+        if (type === "income") setIncome(prevIncome);
+        else if (type === "expense") setExpenses(prevExpenses);
+        else setPurchases(prevPurchases);
+        setErrorBanner(res.error);
+      }
     });
   };
 
@@ -1090,7 +1113,14 @@ function SelectField({
   options: { value: string; label: string }[];
 }) {
   const [value, setValue] = useState(defaultValue);
-  useEffect(() => { setValue(defaultValue); }, [defaultValue]);
+  // Re-sync when the dialog is reused for a different row. Adjusting state
+  // during render is cheaper than an effect: React re-runs this component
+  // before committing, so the stale value never reaches the DOM.
+  const [syncedDefault, setSyncedDefault] = useState(defaultValue);
+  if (syncedDefault !== defaultValue) {
+    setSyncedDefault(defaultValue);
+    setValue(defaultValue);
+  }
   return (
     <>
       <input type="hidden" name={name} value={value} />
@@ -1306,7 +1336,10 @@ function ExpenseDialog({
     toBreakdownItems(editing?.breakdown_items ?? [])
   );
 
-  useEffect(() => {
+  // Reset every field when the dialog is reused for a different expense.
+  const [syncedEditing, setSyncedEditing] = useState(editing);
+  if (syncedEditing !== editing) {
+    setSyncedEditing(editing);
     setPayer(editing?.payer ?? "both");
     setExpenseType(editing?.expense_type ?? "fixed");
     setFixedAmount(Number(editing?.amount ?? 0));
@@ -1314,7 +1347,7 @@ function ExpenseDialog({
     setCreditMonths(editing?.credit_months ?? 12);
     setCreditRate(editing?.credit_interest_rate ?? 0);
     setBreakdownItems(toBreakdownItems(editing?.breakdown_items ?? []));
-  }, [editing]);
+  }
 
   useEffect(() => {
     if (state?.ok && state?.data) { onSaved(state.data); onOpenChange(false); }
@@ -2652,6 +2685,35 @@ function TransferDialog({
 // ExpandedSavingsDialog — full list with search + filters
 // ============================================================================
 
+type SavingsSortKey = "date" | "amount";
+
+/**
+ * Sortable column header for the expanded savings table. Declared at module
+ * scope so its identity is stable — a component defined inside another
+ * component is a brand-new type on every render, which throws away the
+ * subtree's DOM and state each time the parent re-renders.
+ */
+function SortTh({
+  col,
+  label,
+  sortKey,
+  sortDir,
+  onToggle,
+}: {
+  col: SavingsSortKey;
+  label: string;
+  sortKey: SavingsSortKey;
+  sortDir: "asc" | "desc";
+  onToggle: (col: SavingsSortKey) => void;
+}) {
+  const active = sortKey === col;
+  return (
+    <th className="cursor-pointer select-none hover:text-ink transition-colors" onClick={() => onToggle(col)}>
+      {label} {active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
+    </th>
+  );
+}
+
 function ExpandedSavingsDialog({
   open, onOpenChange, savings, onEdit, onDelete, onAdd,
 }: {
@@ -2664,10 +2726,10 @@ function ExpandedSavingsDialog({
 }) {
   const [search, setSearch] = useState("");
   const [contributorFilter, setContributorFilter] = useState("all");
-  const [sortKey, setSortKey] = useState<"date" | "amount">("date");
+  const [sortKey, setSortKey] = useState<SavingsSortKey>("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  function toggleSort(key: "date" | "amount") {
+  function toggleSort(key: SavingsSortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(key); setSortDir("desc"); }
   }
@@ -2687,15 +2749,6 @@ function ExpandedSavingsDialog({
   }, [savings, search, contributorFilter, sortKey, sortDir]);
 
   const fs = "h-8 text-[12px] rounded border border-line bg-paper px-2 text-ink focus:outline-none";
-
-  function SortTh({ col, label }: { col: "date" | "amount"; label: string }) {
-    const active = sortKey === col;
-    return (
-      <th className="cursor-pointer select-none hover:text-ink transition-colors" onClick={() => toggleSort(col)}>
-        {label} {active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
-      </th>
-    );
-  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2720,8 +2773,8 @@ function ExpandedSavingsDialog({
               <tr>
                 <th>Source</th>
                 <th>Contributor</th>
-                <SortTh col="date" label="Date" />
-                <SortTh col="amount" label="Amount" />
+                <SortTh col="date" label="Date" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+                <SortTh col="amount" label="Amount" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
                 <th>Notes</th>
                 <th></th>
               </tr>
@@ -2987,7 +3040,9 @@ function CalendarView({ income, expenses, purchases, settings, startingCash, gro
   }, [currentMonth, filteredIncome, filteredExpenses, filteredPurchases, settings, startingCash, groomStartingCash, brideStartingCash, personFilter]);
 
   const [y, m] = currentMonth.split("-").map(Number);
-  const daysInMonth = new Date(y, m, 0).getDate();
+  // Memoised so the dailyBalances memo below has a dependency the compiler
+  // can trace, rather than a value recomputed inline on every render.
+  const daysInMonth = useMemo(() => new Date(y, m, 0).getDate(), [y, m]);
 
   const dailyBalances = useMemo(() => {
     const arr: number[] = Array(daysInMonth + 1).fill(0);

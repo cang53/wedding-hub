@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { formatMoney, cn } from "@/lib/utils";
+import { ActionError } from "@/components/action-error";
 import { Segmented } from "@/components/ui/segmented";
 import { usePageHeader } from "@/components/shell/header-context";
 import { PlannerProvider, usePlanner } from "./use-planner";
@@ -24,7 +25,7 @@ export function HoneymoonClient({
 type View = "cards" | "compare";
 
 function PlannerShell() {
-  const { scenarios, addScenario, duplicate } = usePlanner();
+  const { scenarios, addScenario, duplicate, error, dismissError } = usePlanner();
   const [openId, setOpenId] = useState<string | null>(null);
   const [view, setView] = useState<View>("cards");
 
@@ -46,6 +47,8 @@ function PlannerShell() {
           onChange={setView}
         />
       )}
+
+      <ActionError message={error} onDismiss={dismissError} />
 
       {scenarios.length === 0 ? (
         <EmptyState onNew={handleNew} />

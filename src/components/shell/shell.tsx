@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -18,24 +18,42 @@ const WEDDING_DATE_LONG = new Date(WEDDING_DATE).toLocaleDateString("en-GB", {
 
 const THEME_STORAGE_KEY = "wedding-hub-theme";
 
+// Theme lives in localStorage, an external store, so it's read through
+// useSyncExternalStore rather than a mount effect that calls setState —
+// the latter costs a second render pass and trips react-hooks/set-state-in-effect.
+const themeListeners = new Set<() => void>();
+
+function subscribeTheme(onStoreChange: () => void) {
+  themeListeners.add(onStoreChange);
+  return () => themeListeners.delete(onStoreChange);
+}
+
+function getThemeSnapshot(): "light" | "dark" {
+  return localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
+}
+
+function getThemeServerSnapshot(): "light" | "dark" {
+  return "light";
+}
+
+function applyTheme(next: "light" | "dark") {
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem(THEME_STORAGE_KEY, next);
+  for (const listener of themeListeners) listener();
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const theme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, getThemeServerSnapshot);
 
+  // Sync the DOM attribute the CSS reads to the resolved theme — a genuine
+  // external-system update, not a state signal, so it belongs in an effect.
   useEffect(() => {
-    const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    const initial = stored === "dark" ? "dark" : "light";
-    setTheme(initial);
-    document.documentElement.dataset.theme = initial;
-  }, []);
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   const toggleTheme = () => {
-    setTheme((prev) => {
-      const next = prev === "dark" ? "light" : "dark";
-      document.documentElement.dataset.theme = next;
-      localStorage.setItem(THEME_STORAGE_KEY, next);
-      return next;
-    });
+    applyTheme(theme === "dark" ? "light" : "dark");
   };
 
   return (
